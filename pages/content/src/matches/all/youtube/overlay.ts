@@ -13,9 +13,6 @@ import type { SubtitleStyleType } from '@extension/storage';
 
 const STYLE_TAG_ID = 'openlingo-yt-styles';
 const ROOT_ID = 'openlingo-yt-overlay';
-const LINE_CLASS = 'openlingo-yt-line';
-const SOURCE_CLASS = 'openlingo-yt-source';
-const BREAK_CLASS = 'openlingo-yt-break';
 const TRANSLATION_CLASS = 'openlingo-yt-translation';
 
 const STYLE_FONTS: Record<SubtitleStyleType, string> = {
@@ -61,31 +58,19 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
       text-align: center;
       contain: layout style paint;
     }
-    #${ROOT_ID} .${LINE_CLASS} {
+    #${ROOT_ID} .${TRANSLATION_CLASS} {
       display: inline;
       padding: 0 0.18em;
       border-radius: 2px;
       background: rgba(8, 8, 8, 0.72);
       -webkit-box-decoration-break: clone;
       box-decoration-break: clone;
+      font-family: ${STYLE_FONTS[preset]};
+      font-style: ${STYLE_ITALIC[preset]};
       color: #fff;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
       letter-spacing: 0;
       white-space: pre-wrap;
-    }
-    #${ROOT_ID} .${SOURCE_CLASS} {
-      font-family: "YouTube Noto", Roboto, Arial, sans-serif;
-      font-style: normal;
-      font-weight: 600;
-    }
-    #${ROOT_ID} .${TRANSLATION_CLASS} {
-      font-family: ${STYLE_FONTS[preset]};
-      font-style: ${STYLE_ITALIC[preset]};
-    }
-    #${ROOT_ID}[data-show-source="0"] .${SOURCE_CLASS},
-    #${ROOT_ID}[data-show-source="0"] .${BREAK_CLASS},
-    #${ROOT_ID}[data-has-translation="0"] .${TRANSLATION_CLASS} {
-      display: none;
     }
   `;
   if (existing) {
@@ -142,23 +127,10 @@ const ensureRoot = (): HTMLElement | null => {
   if (!root) {
     root = document.createElement('div');
     root.id = ROOT_ID;
+    const line = document.createElement('span');
+    line.className = TRANSLATION_CLASS;
+    root.appendChild(line);
     player.appendChild(root);
-  }
-  if (!root.querySelector(`.${SOURCE_CLASS}`)) {
-    const source = document.createElement('span');
-    source.className = `${LINE_CLASS} ${SOURCE_CLASS}`;
-    root.insertBefore(source, root.firstChild);
-  }
-  if (!root.querySelector(`.${BREAK_CLASS}`)) {
-    const lineBreak = document.createElement('br');
-    lineBreak.className = BREAK_CLASS;
-    const source = root.querySelector(`.${SOURCE_CLASS}`);
-    source?.after(lineBreak);
-  }
-  if (!root.querySelector(`.${TRANSLATION_CLASS}`)) {
-    const translation = document.createElement('span');
-    translation.className = `${LINE_CLASS} ${TRANSLATION_CLASS}`;
-    root.appendChild(translation);
   }
   return root;
 };
@@ -195,45 +167,20 @@ const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement): void =
   root.style.top = `${top}px`;
 };
 
-const syncFallbackPosition = (root: HTMLElement): void => {
-  const player = findPlayerElement();
-  if (!player) return;
-
-  const playerRect = player.getBoundingClientRect();
-  const fontSize = Math.min(Math.max(playerRect.height * 0.045, 19), 38);
-  root.style.fontSize = `${fontSize}px`;
-  root.style.lineHeight = '1.36';
-  root.style.fontWeight = '600';
-  root.style.maxWidth = `${playerRect.width * 0.86}px`;
-  root.style.left = `${playerRect.width / 2}px`;
-  root.style.display = 'block';
-
-  const rootRect = root.getBoundingClientRect();
-  const controlsReserve = player.classList.contains('ytp-autohide') ? 18 : 68;
-  const top = Math.max(0, playerRect.height - rootRect.height - controlsReserve - 20);
-  root.style.top = `${top}px`;
-};
-
 const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   let cues = initial.cues;
   let translations = initial.translations;
   let destroyed = false;
   let cueIndexHint = 0;
   let lastRenderedCueId: number | null = -1;
-  let lastRenderedSource = '';
-  let lastRenderedTranslation = '';
-  let lastShowSource = false;
+  let lastRenderedText = '';
   let rafId = 0;
 
   ensureStyleTag(initial.subtitleStyle);
 
-  const writeLines = (root: HTMLElement, sourceText: string, translationText: string, showSource: boolean): void => {
-    const source = root.querySelector<HTMLElement>(`.${SOURCE_CLASS}`);
-    const translation = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
-    if (source && source.textContent !== sourceText) source.textContent = sourceText;
-    if (translation && translation.textContent !== translationText) translation.textContent = translationText;
-    root.dataset.showSource = showSource ? '1' : '0';
-    root.dataset.hasTranslation = translationText ? '1' : '0';
+  const writeText = (root: HTMLElement, text: string): void => {
+    const line = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
+    if (line && line.textContent !== text) line.textContent = text;
   };
 
   const tick = (): void => {
@@ -244,7 +191,12 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     if (!root) return;
 
     const captionWindow = pickCaptionWindow(findCaptionWindows());
-    const hasNativeCaption = !!captionWindow;
+    if (!captionWindow) {
+      hideRoot(root);
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
+      return;
+    }
 
     const video = findVideoElement();
     const timeMs = video ? video.currentTime * 1000 : 0;
@@ -254,38 +206,25 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     if (!cue) {
       hideRoot(root);
       lastRenderedCueId = null;
-      lastRenderedSource = '';
-      lastRenderedTranslation = '';
+      lastRenderedText = '';
       return;
     }
 
     const translation = translations.get(cue.id)?.trim() ?? '';
-    const showSource = !hasNativeCaption;
-    if (!translation && !showSource) {
+    if (!translation) {
       hideRoot(root);
       lastRenderedCueId = cue.id;
-      lastRenderedSource = '';
-      lastRenderedTranslation = '';
+      lastRenderedText = '';
       return;
     }
 
-    const stateChanged =
-      cue.id !== lastRenderedCueId ||
-      cue.text !== lastRenderedSource ||
-      translation !== lastRenderedTranslation ||
-      showSource !== lastShowSource;
+    const stateChanged = cue.id !== lastRenderedCueId || translation !== lastRenderedText;
     if (stateChanged) {
-      writeLines(root, cue.text, translation, showSource);
+      writeText(root, translation);
       lastRenderedCueId = cue.id;
-      lastRenderedSource = cue.text;
-      lastRenderedTranslation = translation;
-      lastShowSource = showSource;
+      lastRenderedText = translation;
     }
-    if (captionWindow) {
-      syncRootPosition(root, captionWindow);
-    } else {
-      syncFallbackPosition(root);
-    }
+    syncRootPosition(root, captionWindow);
   };
 
   rafId = requestAnimationFrame(tick);
@@ -296,15 +235,11 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
       translations = newTranslations;
       cueIndexHint = 0;
       lastRenderedCueId = -1;
-      lastRenderedSource = '';
-      lastRenderedTranslation = '';
-      lastShowSource = false;
+      lastRenderedText = '';
     },
     refresh: () => {
       lastRenderedCueId = -1;
-      lastRenderedSource = '';
-      lastRenderedTranslation = '';
-      lastShowSource = false;
+      lastRenderedText = '';
     },
     destroy: () => {
       destroyed = true;
