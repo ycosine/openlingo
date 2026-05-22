@@ -3,9 +3,12 @@ import { useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
 import { providerCredentialsStorage, translationSettingsStorage } from '@extension/storage';
 import { DEFAULT_SYSTEM_PROMPT_TEMPLATE, getProviderPreset, PROVIDER_PRESETS } from '@extension/translation';
 import { ErrorDisplay, LoadingSpinner } from '@extension/ui';
+import VideoSubtitlesTab from '@src/VideoSubtitlesTab';
 import { useEffect, useMemo, useState } from 'react';
 import type { ProviderCredential, ProviderId } from '@extension/translation';
 import type { CSSProperties, ReactNode } from 'react';
+
+type TabId = 'general' | 'video';
 
 const ACCENT = '#0F4F4A';
 const INK = '#15201F';
@@ -611,6 +614,7 @@ const Options = () => {
   const [validating, setValidating] = useState(false);
   const [validateResult, setValidateResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle');
+  const [tab, setTab] = useState<TabId>('general');
 
   useEffect(() => {
     const merged: ProviderCredential = { ...(preset.defaults ?? {}), ...storedCred };
@@ -758,343 +762,400 @@ const Options = () => {
       </div>
 
       <div style={{ maxWidth: 660, margin: '0 auto', padding: '40px 32px 80px' }}>
-        <div style={{ marginBottom: 30 }}>
+        <div style={{ marginBottom: 22 }}>
           <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em' }}>Settings</div>
         </div>
 
-        <Card title="Provider & API key">
-          <Field
-            label="Translation provider"
-            hint="Each provider needs its own credentials. Switching here changes which ones are used.">
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                gap: 8,
-              }}>
-              {PROVIDER_PRESETS.map(p => {
-                const active = p.id === providerId;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => onProviderChange(p.id)}
-                    style={{
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      padding: '10px 12px',
-                      height: 44,
-                      background: active ? `${ACCENT}0F` : '#FBF7EE',
-                      border: `1px solid ${active ? `${ACCENT}88` : 'rgba(15,79,74,0.10)'}`,
-                      borderRadius: 10,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 9,
-                      transition: 'border-color 0.12s, background 0.12s',
-                      outline: active ? `2px solid ${ACCENT}22` : 'none',
-                      outlineOffset: '-1px',
-                    }}>
-                    <span style={{ color: ACCENT, display: 'inline-flex' }}>
-                      <ProviderGlyph id={p.id} color={ACCENT} size={15} />
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.name}</span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: INK_FAINT,
-                          fontFamily: '"Geist Mono", ui-monospace, monospace',
-                        }}>
-                        {p.tier}
-                      </span>
-                    </span>
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        width: 14,
-                        height: 14,
-                        borderRadius: 99,
-                        background: active ? ACCENT : 'transparent',
-                        border: active ? 'none' : '1.5px solid rgba(15,79,74,0.20)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}>
-                      {active && <CheckIcon size={9} color="#fff" />}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </Field>
-
-          {requiresKey && (
-            <Field
-              label={`${preset.name} key`}
-              right={
-                detectedTier && (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: INK_FAINT,
-                      fontFamily: '"Geist Mono", ui-monospace, monospace',
-                      letterSpacing: '0.04em',
-                    }}>
-                    Detected: <span style={{ color: INK }}>{detectedTier}</span>
-                  </span>
-                )
-              }>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <KeyField
-                  value={draft.apiKey ?? ''}
-                  onChange={v => updateDraft({ apiKey: v })}
-                  placeholder={providerId === 'deepl' ? '00000000-0000-0000-0000-000000000000:fx' : 'sk-…'}
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            marginBottom: 22,
+            borderBottom: `0.5px solid ${CARD_BORDER}`,
+          }}>
+          {(
+            [
+              { id: 'general', label: 'General' },
+              { id: 'video', label: 'Video subtitles' },
+            ] as const
+          ).map(t => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                style={{
+                  position: 'relative',
+                  border: 0,
+                  background: 'transparent',
+                  padding: '10px 14px 12px',
+                  fontFamily: 'inherit',
+                  fontSize: 13,
+                  fontWeight: active ? 600 : 500,
+                  color: active ? INK : INK_SOFT,
+                  cursor: 'pointer',
+                  letterSpacing: '-0.005em',
+                }}>
+                {t.label}
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 8,
+                    right: 8,
+                    bottom: -1,
+                    height: 2,
+                    background: active ? ACCENT : 'transparent',
+                    borderRadius: 2,
+                    transition: 'background 0.15s',
+                  }}
                 />
-                <button
-                  type="button"
-                  onClick={test}
-                  disabled={!requiredFilled || validating}
-                  style={optBtn(ACCENT, false, !requiredFilled || validating)}>
-                  {validating ? (
-                    <>
-                      <Spinner size={12} color={ACCENT} />
-                      <span style={{ marginLeft: 7 }}>Testing</span>
-                    </>
-                  ) : (
-                    'Test'
-                  )}
-                </button>
-                <button type="button" onClick={save} disabled={!dirty} style={optBtn(ACCENT, true, !dirty)}>
-                  {saveState === 'saved' ? (
-                    <>
-                      <CheckIcon size={12} color="#fff" />
-                      <span style={{ marginLeft: 7 }}>Saved</span>
-                    </>
-                  ) : (
-                    'Save'
-                  )}
-                </button>
-              </div>
+              </button>
+            );
+          })}
+        </div>
 
-              {validateResult && (
+        {tab === 'video' && <VideoSubtitlesTab />}
+
+        {tab === 'general' && (
+          <>
+            <Card title="Provider & API key">
+              <Field
+                label="Translation provider"
+                hint="Each provider needs its own credentials. Switching here changes which ones are used.">
                 <div
                   style={{
-                    marginTop: 10,
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 9,
-                    padding: '9px 11px',
-                    borderRadius: 9,
-                    background: validateResult.ok ? '#E8F2EA' : '#FBEAEA',
-                    border: validateResult.ok ? '0.5px solid rgba(44,122,92,0.25)' : '0.5px solid rgba(194,74,74,0.25)',
-                    fontSize: 12.5,
-                    lineHeight: 1.4,
-                    color: validateResult.ok ? '#1F5A41' : '#7A2828',
-                    animation: 'ol-fadeup 0.2s ease both',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+                    gap: 8,
                   }}>
-                  {validateResult.ok ? (
-                    <>
-                      <span style={{ color: '#2C7A5C', flexShrink: 0, marginTop: 1 }}>
+                  {PROVIDER_PRESETS.map(p => {
+                    const active = p.id === providerId;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => onProviderChange(p.id)}
+                        style={{
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          padding: '10px 12px',
+                          height: 44,
+                          background: active ? `${ACCENT}0F` : '#FBF7EE',
+                          border: `1px solid ${active ? `${ACCENT}88` : 'rgba(15,79,74,0.10)'}`,
+                          borderRadius: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 9,
+                          transition: 'border-color 0.12s, background 0.12s',
+                          outline: active ? `2px solid ${ACCENT}22` : 'none',
+                          outlineOffset: '-1px',
+                        }}>
+                        <span style={{ color: ACCENT, display: 'inline-flex' }}>
+                          <ProviderGlyph id={p.id} color={ACCENT} size={15} />
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.name}</span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: INK_FAINT,
+                              fontFamily: '"Geist Mono", ui-monospace, monospace',
+                            }}>
+                            {p.tier}
+                          </span>
+                        </span>
                         <span
                           style={{
-                            display: 'inline-flex',
-                            width: 15,
-                            height: 15,
+                            flexShrink: 0,
+                            width: 14,
+                            height: 14,
                             borderRadius: 99,
-                            background: '#2C7A5C',
+                            background: active ? ACCENT : 'transparent',
+                            border: active ? 'none' : '1.5px solid rgba(15,79,74,0.20)',
+                            display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                           }}>
-                          <CheckIcon size={9} color="#fff" />
+                          {active && <CheckIcon size={9} color="#fff" />}
                         </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {requiresKey && (
+                <Field
+                  label={`${preset.name} key`}
+                  right={
+                    detectedTier && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: INK_FAINT,
+                          fontFamily: '"Geist Mono", ui-monospace, monospace',
+                          letterSpacing: '0.04em',
+                        }}>
+                        Detected: <span style={{ color: INK }}>{detectedTier}</span>
                       </span>
-                      <div style={{ flex: 1 }}>
-                        <strong style={{ fontWeight: 600 }}>Key works.</strong> &nbsp;Endpoint:{' '}
-                        <code style={mono('#1F5A41')}>{endpointLabel}</code>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ color: '#C24A4A', flexShrink: 0, marginTop: 1 }}>
-                        <AlertIcon size={13} color="#C24A4A" />
-                      </span>
-                      <div style={{ flex: 1 }}>
-                        <strong style={{ fontWeight: 600 }}>Test failed.</strong>{' '}
-                        <span style={mono('#C24A4A')}>AUTH</span>{' '}
-                        {validateResult.message ?? `${preset.name} rejected the credentials.`}
-                      </div>
-                    </>
+                    )
+                  }>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <KeyField
+                      value={draft.apiKey ?? ''}
+                      onChange={v => updateDraft({ apiKey: v })}
+                      placeholder={providerId === 'deepl' ? '00000000-0000-0000-0000-000000000000:fx' : 'sk-…'}
+                    />
+                    <button
+                      type="button"
+                      onClick={test}
+                      disabled={!requiredFilled || validating}
+                      style={optBtn(ACCENT, false, !requiredFilled || validating)}>
+                      {validating ? (
+                        <>
+                          <Spinner size={12} color={ACCENT} />
+                          <span style={{ marginLeft: 7 }}>Testing</span>
+                        </>
+                      ) : (
+                        'Test'
+                      )}
+                    </button>
+                    <button type="button" onClick={save} disabled={!dirty} style={optBtn(ACCENT, true, !dirty)}>
+                      {saveState === 'saved' ? (
+                        <>
+                          <CheckIcon size={12} color="#fff" />
+                          <span style={{ marginLeft: 7 }}>Saved</span>
+                        </>
+                      ) : (
+                        'Save'
+                      )}
+                    </button>
+                  </div>
+
+                  {validateResult && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 9,
+                        padding: '9px 11px',
+                        borderRadius: 9,
+                        background: validateResult.ok ? '#E8F2EA' : '#FBEAEA',
+                        border: validateResult.ok
+                          ? '0.5px solid rgba(44,122,92,0.25)'
+                          : '0.5px solid rgba(194,74,74,0.25)',
+                        fontSize: 12.5,
+                        lineHeight: 1.4,
+                        color: validateResult.ok ? '#1F5A41' : '#7A2828',
+                        animation: 'ol-fadeup 0.2s ease both',
+                      }}>
+                      {validateResult.ok ? (
+                        <>
+                          <span style={{ color: '#2C7A5C', flexShrink: 0, marginTop: 1 }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                width: 15,
+                                height: 15,
+                                borderRadius: 99,
+                                background: '#2C7A5C',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}>
+                              <CheckIcon size={9} color="#fff" />
+                            </span>
+                          </span>
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ fontWeight: 600 }}>Key works.</strong> &nbsp;Endpoint:{' '}
+                            <code style={mono('#1F5A41')}>{endpointLabel}</code>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ color: '#C24A4A', flexShrink: 0, marginTop: 1 }}>
+                            <AlertIcon size={13} color="#C24A4A" />
+                          </span>
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ fontWeight: 600 }}>Test failed.</strong>{' '}
+                            <span style={mono('#C24A4A')}>AUTH</span>{' '}
+                            {validateResult.message ?? `${preset.name} rejected the credentials.`}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
+                </Field>
+              )}
+
+              {requiresBaseUrl && (
+                <Field
+                  label="Model preset"
+                  hint="Quick-fill Base URL + Model for popular providers. Anything OpenAI-compatible works here. Pick one and tweak below if you need.">
+                  <ModelPresetSelect
+                    baseUrl={draft.baseUrl ?? ''}
+                    model={draft.model ?? ''}
+                    onPick={p => updateDraft({ baseUrl: p.baseUrl, model: p.model })}
+                  />
+                </Field>
+              )}
+
+              {requiresBaseUrl && (
+                <Field
+                  label="Base URL"
+                  right={
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: INK_FAINT,
+                        fontFamily: '"Geist Mono", ui-monospace, monospace',
+                      }}>
+                      Default: {preset.defaults?.baseUrl ?? '—'}
+                    </span>
+                  }>
+                  <PlainInput
+                    value={draft.baseUrl ?? ''}
+                    onChange={v => updateDraft({ baseUrl: v })}
+                    placeholder={preset.defaults?.baseUrl ?? 'https://api.example.com/v1'}
+                    monoFont
+                  />
+                </Field>
+              )}
+
+              {providerId === 'deepl' && (
+                <Field
+                  label="Base URL"
+                  right={
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: INK_FAINT,
+                        fontFamily: '"Geist Mono", ui-monospace, monospace',
+                      }}>
+                      Auto · key-derived
+                    </span>
+                  }
+                  hint="DeepL's endpoint is derived from your API key — :fx keys hit the Free host, otherwise Pro.">
+                  <PlainInput
+                    value={
+                      trimmedKey
+                        ? trimmedKey.endsWith(':fx')
+                          ? 'https://api-free.deepl.com'
+                          : 'https://api.deepl.com'
+                        : ''
+                    }
+                    onChange={() => undefined}
+                    placeholder="https://api-free.deepl.com"
+                    monoFont
+                    disabled
+                  />
+                </Field>
+              )}
+
+              {requiresModel && (
+                <Field
+                  label="Model"
+                  right={
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: INK_FAINT,
+                        fontFamily: '"Geist Mono", ui-monospace, monospace',
+                      }}>
+                      Default: {preset.defaults?.model ?? '—'}
+                    </span>
+                  }>
+                  <PlainInput
+                    value={draft.model ?? ''}
+                    onChange={v => updateDraft({ model: v })}
+                    placeholder={preset.defaults?.model ?? 'gpt-4o-mini'}
+                    monoFont
+                  />
+                </Field>
+              )}
+
+              {hasAdvanced && (
+                <Field
+                  label="System prompt"
+                  right={
+                    <button
+                      type="button"
+                      onClick={() => updateDraft({ systemPrompt: DEFAULT_SYSTEM_PROMPT_TEMPLATE })}
+                      style={{
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        cursor: 'pointer',
+                        color: ACCENT,
+                        fontSize: 11,
+                        fontFamily: '"Geist Mono", ui-monospace, monospace',
+                        letterSpacing: '0.04em',
+                      }}>
+                      {draft.systemPrompt?.trim() ? 'Reset to default' : 'Insert default template'}
+                    </button>
+                  }
+                  hint="Placeholders: {{to}} → target language. Unknown placeholders are stripped. Leave empty to use the built-in template.">
+                  <Textarea
+                    value={draft.systemPrompt ?? ''}
+                    onChange={v => updateDraft({ systemPrompt: v })}
+                    placeholder={DEFAULT_SYSTEM_PROMPT_TEMPLATE}
+                    minHeight={220}
+                    monoFont
+                  />
+                </Field>
+              )}
+
+              {!requiresKey && !requiresBaseUrl && (
+                <div
+                  style={{
+                    marginTop: -4,
+                    padding: '9px 11px',
+                    borderRadius: 9,
+                    background: '#E8F2EA',
+                    border: '0.5px solid rgba(44,122,92,0.25)',
+                    fontSize: 12.5,
+                    color: '#1F5A41',
+                    display: 'flex',
+                    gap: 9,
+                    alignItems: 'flex-start',
+                  }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      width: 15,
+                      height: 15,
+                      borderRadius: 99,
+                      background: '#2C7A5C',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      marginTop: 1,
+                    }}>
+                    <CheckIcon size={9} color="#fff" />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ fontWeight: 600 }}>No API key required.</strong> Uses the public{' '}
+                    <code style={mono('#1F5A41')}>translate.googleapis.com</code> endpoint — unofficial, Google may
+                    rate-limit heavy use.
+                  </div>
                 </div>
               )}
-            </Field>
-          )}
+            </Card>
 
-          {requiresBaseUrl && (
-            <Field
-              label="Model preset"
-              hint="Quick-fill Base URL + Model for popular providers. Anything OpenAI-compatible works here. Pick one and tweak below if you need.">
-              <ModelPresetSelect
-                baseUrl={draft.baseUrl ?? ''}
-                model={draft.model ?? ''}
-                onPick={p => updateDraft({ baseUrl: p.baseUrl, model: p.model })}
-              />
-            </Field>
-          )}
-
-          {requiresBaseUrl && (
-            <Field
-              label="Base URL"
-              right={
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: INK_FAINT,
-                    fontFamily: '"Geist Mono", ui-monospace, monospace',
-                  }}>
-                  Default: {preset.defaults?.baseUrl ?? '—'}
-                </span>
-              }>
-              <PlainInput
-                value={draft.baseUrl ?? ''}
-                onChange={v => updateDraft({ baseUrl: v })}
-                placeholder={preset.defaults?.baseUrl ?? 'https://api.example.com/v1'}
-                monoFont
-              />
-            </Field>
-          )}
-
-          {providerId === 'deepl' && (
-            <Field
-              label="Base URL"
-              right={
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: INK_FAINT,
-                    fontFamily: '"Geist Mono", ui-monospace, monospace',
-                  }}>
-                  Auto · key-derived
-                </span>
-              }
-              hint="DeepL's endpoint is derived from your API key — :fx keys hit the Free host, otherwise Pro.">
-              <PlainInput
-                value={
-                  trimmedKey
-                    ? trimmedKey.endsWith(':fx')
-                      ? 'https://api-free.deepl.com'
-                      : 'https://api.deepl.com'
-                    : ''
-                }
-                onChange={() => undefined}
-                placeholder="https://api-free.deepl.com"
-                monoFont
-                disabled
-              />
-            </Field>
-          )}
-
-          {requiresModel && (
-            <Field
-              label="Model"
-              right={
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: INK_FAINT,
-                    fontFamily: '"Geist Mono", ui-monospace, monospace',
-                  }}>
-                  Default: {preset.defaults?.model ?? '—'}
-                </span>
-              }>
-              <PlainInput
-                value={draft.model ?? ''}
-                onChange={v => updateDraft({ model: v })}
-                placeholder={preset.defaults?.model ?? 'gpt-4o-mini'}
-                monoFont
-              />
-            </Field>
-          )}
-
-          {hasAdvanced && (
-            <Field
-              label="System prompt"
-              right={
-                <button
-                  type="button"
-                  onClick={() => updateDraft({ systemPrompt: DEFAULT_SYSTEM_PROMPT_TEMPLATE })}
-                  style={{
-                    background: 'transparent',
-                    border: 0,
-                    padding: 0,
-                    cursor: 'pointer',
-                    color: ACCENT,
-                    fontSize: 11,
-                    fontFamily: '"Geist Mono", ui-monospace, monospace',
-                    letterSpacing: '0.04em',
-                  }}>
-                  {draft.systemPrompt?.trim() ? 'Reset to default' : 'Insert default template'}
-                </button>
-              }
-              hint="Placeholders: {{to}} → target language. Unknown placeholders are stripped. Leave empty to use the built-in template.">
-              <Textarea
-                value={draft.systemPrompt ?? ''}
-                onChange={v => updateDraft({ systemPrompt: v })}
-                placeholder={DEFAULT_SYSTEM_PROMPT_TEMPLATE}
-                minHeight={220}
-                monoFont
-              />
-            </Field>
-          )}
-
-          {!requiresKey && !requiresBaseUrl && (
-            <div
-              style={{
-                marginTop: -4,
-                padding: '9px 11px',
-                borderRadius: 9,
-                background: '#E8F2EA',
-                border: '0.5px solid rgba(44,122,92,0.25)',
-                fontSize: 12.5,
-                color: '#1F5A41',
-                display: 'flex',
-                gap: 9,
-                alignItems: 'flex-start',
-              }}>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  width: 15,
-                  height: 15,
-                  borderRadius: 99,
-                  background: '#2C7A5C',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  marginTop: 1,
-                }}>
-                <CheckIcon size={9} color="#fff" />
-              </span>
-              <div style={{ flex: 1 }}>
-                <strong style={{ fontWeight: 600 }}>No API key required.</strong> Uses the public{' '}
-                <code style={mono('#1F5A41')}>translate.googleapis.com</code> endpoint — unofficial, Google may
-                rate-limit heavy use.
+            <Card title="Translation">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <Field label="Target language" hint="Where translations land.">
+                  <LangSelect value={settings.targetLang} onChange={onTargetChange} />
+                </Field>
+                <Field label="Source language" hint="Auto-detect handles almost every page well.">
+                  <LangSelect value={settings.sourceLang} onChange={onSourceChange} includeAuto />
+                </Field>
               </div>
-            </div>
-          )}
-        </Card>
-
-        <Card title="Translation">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Target language" hint="Where translations land.">
-              <LangSelect value={settings.targetLang} onChange={onTargetChange} />
-            </Field>
-            <Field label="Source language" hint="Auto-detect handles almost every page well.">
-              <LangSelect value={settings.sourceLang} onChange={onSourceChange} includeAuto />
-            </Field>
-          </div>
-        </Card>
+            </Card>
+          </>
+        )}
 
         <div style={{ fontSize: 11, color: INK_FAINT, textAlign: 'center', marginTop: 32 }}>
           Settings sync live across all your tabs.

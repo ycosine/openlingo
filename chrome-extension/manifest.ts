@@ -15,8 +15,13 @@ const manifest = {
   },
   version: packageJson.version,
   description: '__MSG_extensionDescription__',
-  host_permissions: ['<all_urls>', 'https://api.deepl.com/*', 'https://api-free.deepl.com/*'],
-  permissions: ['storage', 'tabs'],
+  host_permissions: [
+    '<all_urls>',
+    'https://api.deepl.com/*',
+    'https://api-free.deepl.com/*',
+    'https://*.youtube.com/*',
+  ],
+  permissions: ['storage', 'tabs', 'webRequest'],
   options_page: 'options/index.html',
   background: {
     service_worker: 'background.js',
