@@ -1,34 +1,14 @@
 {
-  "extensionDescription": {
-    "description": "Extension description",
-    "message": "Chrome extension boilerplate developed with Vite, React and Typescript"
-  },
   "extensionName": {
     "description": "Extension name",
-    "message": "Chrome extension boilerplate"
+    "message": "OpenLingo"
   },
-  "toggleTheme": {
-    "message": "Toggle theme"
-  },
-  "injectButton": {
-    "message": "Click to inject Content Scripts"
-  },
-  "greeting": {
-    "description": "Greeting message",
-    "message": "Hello, My name is $NAME$",
-    "placeholders": {
-      "name": {
-        "content": "$1",
-        "example": "John Doe"
-      }
-    }
-  },
-  "hello": {
-    "description": "Placeholder example",
-    "message": "Hello $1"
+  "extensionDescription": {
+    "description": "Extension description",
+    "message": "Open-source bilingual page translator powered by DeepL"
   },
   "displayErrorInfo": {
-    "message": "Error occur"
+    "message": "Error occurred"
   },
   "displayErrorDescription": {
     "message": "Sorry, something went wrong while loading the page."
@@ -41,5 +21,50 @@
   },
   "displayErrorReset": {
     "message": "Run Again"
+  },
+  "translatePage": {
+    "message": "Translate this page"
+  },
+  "restoreOriginal": {
+    "message": "Restore original"
+  },
+  "translating": {
+    "message": "Translating…"
+  },
+  "apiKeyMissing": {
+    "message": "DeepL API key not set. Open Options to configure."
+  },
+  "openOptions": {
+    "message": "Open Options"
+  },
+  "deepLApiKey": {
+    "message": "DeepL API Key"
+  },
+  "deepLApiKeyHint": {
+    "message": "Keys ending in :fx use DeepL Free (api-free.deepl.com); otherwise DeepL Pro (api.deepl.com)."
+  },
+  "translationPreferences": {
+    "message": "Translation preferences"
+  },
+  "targetLanguage": {
+    "message": "Target language"
+  },
+  "sourceLanguage": {
+    "message": "Source language"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "testKey": {
+    "message": "Test"
+  },
+  "apiKeyValid": {
+    "message": "API key is valid"
+  },
+  "apiKeyInvalid": {
+    "message": "API key invalid"
+  },
+  "cannotInjectHere": {
+    "message": "Cannot translate this page (e.g. chrome:// or extension page)."
   }
 }

@@ -43,12 +43,3 @@ export type StorageConfigType<D = string> = {
     deserialize: (text: string) => D;
   };
 };
-
-export interface ThemeStateType {
-  theme: 'light' | 'dark';
-  isLight: boolean;
-}
-
-export type ThemeStorageType = BaseStorageType<ThemeStateType> & {
-  toggle: () => Promise<void>;
-};
