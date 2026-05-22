@@ -11,6 +11,7 @@ interface TranslateBatchRequest {
   type: 'TR_TRANSLATE_BATCH';
   sessionId: string;
   units: TranslateUnit[];
+  maxConcurrency?: number;
 }
 
 interface TranslateCancelRequest {
@@ -218,6 +219,10 @@ const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<v
 
   const batches = buildBatches(misses, provider);
   let remaining = batches.length;
+  const concurrency =
+    typeof req.maxConcurrency === 'number' && Number.isFinite(req.maxConcurrency)
+      ? Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(req.maxConcurrency)))
+      : MAX_CONCURRENCY;
 
   try {
     await runWithConcurrency(
@@ -265,7 +270,7 @@ const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<v
           done: remaining === 0,
         });
       },
-      MAX_CONCURRENCY,
+      concurrency,
     );
   } catch (err) {
     if (controller.signal.aborted) return;

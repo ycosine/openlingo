@@ -1,11 +1,10 @@
 /**
- * Render translated cues as a second line below YouTube's native caption.
+ * Render translated cues as an independent player overlay.
  *
- * We do *not* take over YouTube's caption rendering — fullscreen, theater
- * mode, picture-in-picture, custom font sizes, and YouTube's own caption
- * styling controls keep working unchanged. We just append a sibling element
- * inside each `.caption-window` and update it whenever the active cue
- * changes.
+ * The important bit here is ownership: YouTube owns `.caption-window`, so we
+ * only read its text geometry and never write into it. Writing into that node
+ * can make YouTube rebuild captions, which looks like repeated injection and
+ * flicker during playback.
  */
 
 import type { Cue } from './cues.js';
@@ -13,6 +12,7 @@ import type { CueTranslationMap } from './translate.js';
 import type { SubtitleStyleType } from '@extension/storage';
 
 const STYLE_TAG_ID = 'openlingo-yt-styles';
+const ROOT_ID = 'openlingo-yt-overlay';
 const TRANSLATION_CLASS = 'openlingo-yt-translation';
 
 const STYLE_FONTS: Record<SubtitleStyleType, string> = {
@@ -28,32 +28,49 @@ const STYLE_ITALIC: Record<SubtitleStyleType, string> = {
 };
 
 interface OverlayHandle {
-  /** Replace the cue source (e.g. after a track switch). */
+  /** Replace the cue source, for example after a track switch. */
   setCues: (cues: Cue[], translations: CueTranslationMap) => void;
-  /** Trigger a re-render — call when translations arrive. */
+  /** Force a repaint on next frame; call when translations arrive. */
   refresh: () => void;
-  /** Tear down — remove DOM nodes, disconnect observers. */
+  /** Tear down the independent overlay root and cancel the rAF loop. */
   destroy: () => void;
+}
+
+interface CreateOverlayOptions {
+  cues: Cue[];
+  translations: CueTranslationMap;
+  subtitleStyle: SubtitleStyleType;
 }
 
 const ensureStyleTag = (preset: SubtitleStyleType): void => {
   const existing = document.getElementById(STYLE_TAG_ID) as HTMLStyleElement | null;
   const css = `
-    .${TRANSLATION_CLASS} {
-      display: block;
-      margin-top: 2px;
+    #${ROOT_ID} {
+      position: absolute;
+      z-index: 62;
+      pointer-events: none;
+      display: none;
+      left: 50%;
+      top: 0;
+      transform: translateX(-50%);
+      max-width: 86%;
+      box-sizing: border-box;
+      text-align: center;
+      contain: layout style paint;
+    }
+    #${ROOT_ID} .${TRANSLATION_CLASS} {
+      display: inline;
+      padding: 0 0.18em;
+      border-radius: 2px;
+      background: rgba(8, 8, 8, 0.72);
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
       font-family: ${STYLE_FONTS[preset]};
       font-style: ${STYLE_ITALIC[preset]};
-      font-size: 0.88em;
-      line-height: 1.25;
-      opacity: 0.92;
-      color: inherit;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.55);
-      letter-spacing: -0.005em;
-    }
-    .${TRANSLATION_CLASS}[data-pending="1"] {
-      opacity: 0.55;
-      font-style: italic;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+      letter-spacing: 0;
+      white-space: pre-wrap;
     }
   `;
   if (existing) {
@@ -66,108 +83,168 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
   document.head.appendChild(tag);
 };
 
-const findActiveCue = (cues: Cue[], timeMs: number): Cue | null => {
-  // Cues are time-ordered; binary search would be tidier but cue counts are
-  // small enough (a few hundred to a few thousand) that linear-from-last is
-  // simpler and still O(1) amortised between adjacent ticks.
-  for (let i = 0; i < cues.length; i++) {
-    const c = cues[i];
-    if (timeMs < c.startMs) return null;
-    if (timeMs <= c.endMs + 80) return c;
-  }
-  return null;
-};
-
-const findCaptionWindows = (): HTMLElement[] => {
-  const nodes = document.querySelectorAll<HTMLElement>('.caption-window');
-  return Array.from(nodes);
+/** Bidirectional linear scan from a hint index. O(1) amortized per frame. */
+const findActiveCue = (cues: Cue[], timeMs: number, startHint: number): { cue: Cue | null; index: number } => {
+  if (cues.length === 0) return { cue: null, index: 0 };
+  let i = Math.max(0, Math.min(startHint, cues.length - 1));
+  while (i > 0 && cues[i].startMs > timeMs) i--;
+  while (i < cues.length && cues[i].endMs + 80 < timeMs) i++;
+  const cue = cues[i];
+  if (!cue || timeMs < cue.startMs) return { cue: null, index: i };
+  return { cue, index: i };
 };
 
 const findVideoElement = (): HTMLVideoElement | null =>
   document.querySelector<HTMLVideoElement>('.html5-main-video, video.video-stream');
 
-interface CreateOverlayOptions {
-  cues: Cue[];
-  translations: CueTranslationMap;
-  subtitleStyle: SubtitleStyleType;
-}
+const findPlayerElement = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('.html5-video-player, #movie_player');
+
+const findCaptionWindows = (): HTMLElement[] =>
+  Array.from(document.querySelectorAll<HTMLElement>('.caption-window')).filter(window => {
+    const rect = window.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+
+const pickCaptionWindow = (windows: HTMLElement[]): HTMLElement | null => {
+  if (windows.length === 0) return null;
+  return windows.reduce((best, current) => {
+    const bestRect = best.getBoundingClientRect();
+    const currentRect = current.getBoundingClientRect();
+    return currentRect.bottom >= bestRect.bottom ? current : best;
+  });
+};
+
+const ensureRoot = (): HTMLElement | null => {
+  const player = findPlayerElement();
+  if (!player) return null;
+
+  let root = document.getElementById(ROOT_ID) as HTMLElement | null;
+  if (root && root.parentElement !== player) {
+    root.remove();
+    root = null;
+  }
+  if (!root) {
+    root = document.createElement('div');
+    root.id = ROOT_ID;
+    const line = document.createElement('span');
+    line.className = TRANSLATION_CLASS;
+    root.appendChild(line);
+    player.appendChild(root);
+  }
+  return root;
+};
+
+const hideRoot = (root: HTMLElement | null): void => {
+  if (root && root.style.display !== 'none') root.style.display = 'none';
+};
+
+const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement): void => {
+  const player = findPlayerElement();
+  if (!player) return;
+
+  const playerRect = player.getBoundingClientRect();
+  const captionRect = captionWindow.getBoundingClientRect();
+  const segment = captionWindow.querySelector<HTMLElement>('.ytp-caption-segment') ?? captionWindow;
+  const segmentStyle = window.getComputedStyle(segment);
+
+  root.style.fontSize = segmentStyle.fontSize;
+  root.style.lineHeight = segmentStyle.lineHeight;
+  root.style.fontWeight = segmentStyle.fontWeight;
+  root.style.maxWidth = `${Math.min(Math.max(captionRect.width * 1.35, 360), playerRect.width * 0.86)}px`;
+  root.style.display = 'block';
+
+  const rootRect = root.getBoundingClientRect();
+  const controlsReserve = player.classList.contains('ytp-autohide') ? 18 : 58;
+  const belowTop = captionRect.bottom - playerRect.top + 6;
+  const maxBelowTop = playerRect.height - rootRect.height - controlsReserve;
+  const aboveTop = captionRect.top - playerRect.top - rootRect.height - 6;
+  const top = belowTop <= maxBelowTop ? belowTop : Math.max(0, aboveTop);
+  const centerX = captionRect.left - playerRect.left + captionRect.width / 2;
+  const minCenter = rootRect.width / 2 + 12;
+  const maxCenter = playerRect.width - rootRect.width / 2 - 12;
+  root.style.left = `${Math.min(Math.max(centerX, minCenter), maxCenter)}px`;
+  root.style.top = `${top}px`;
+};
 
 const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   let cues = initial.cues;
   let translations = initial.translations;
   let destroyed = false;
+  let cueIndexHint = 0;
+  let lastRenderedCueId: number | null = -1;
+  let lastRenderedText = '';
+  let rafId = 0;
 
   ensureStyleTag(initial.subtitleStyle);
 
-  const renderInto = (window: HTMLElement, cue: Cue | null): void => {
-    let line = window.querySelector<HTMLElement>(`:scope > .${TRANSLATION_CLASS}`);
-    if (!cue) {
-      if (line) line.remove();
+  const writeText = (root: HTMLElement, text: string): void => {
+    const line = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
+    if (line && line.textContent !== text) line.textContent = text;
+  };
+
+  const tick = (): void => {
+    if (destroyed) return;
+    rafId = requestAnimationFrame(tick);
+
+    const root = ensureRoot();
+    if (!root) return;
+
+    const captionWindow = pickCaptionWindow(findCaptionWindows());
+    if (!captionWindow) {
+      hideRoot(root);
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
       return;
     }
-    const translation = translations.get(cue.id);
-    if (!line) {
-      line = document.createElement('span');
-      line.className = TRANSLATION_CLASS;
-      window.appendChild(line);
-    }
-    if (translation) {
-      line.removeAttribute('data-pending');
-      if (line.textContent !== translation) line.textContent = translation;
-    } else {
-      // Translation not yet ready — show a soft hyphen so the layout shift is
-      // minimal when the real text arrives.
-      line.setAttribute('data-pending', '1');
-      if (line.textContent !== '…') line.textContent = '…';
-    }
-  };
 
-  const render = (): void => {
-    if (destroyed) return;
     const video = findVideoElement();
     const timeMs = video ? video.currentTime * 1000 : 0;
-    const cue = findActiveCue(cues, timeMs);
-    const windows = findCaptionWindows();
-    if (windows.length === 0) return;
-    for (const w of windows) renderInto(w, cue);
+    const { cue, index } = findActiveCue(cues, timeMs, cueIndexHint);
+    cueIndexHint = index;
+
+    if (!cue) {
+      hideRoot(root);
+      lastRenderedCueId = null;
+      lastRenderedText = '';
+      return;
+    }
+
+    const translation = translations.get(cue.id)?.trim() ?? '';
+    if (!translation) {
+      hideRoot(root);
+      lastRenderedCueId = cue.id;
+      lastRenderedText = '';
+      return;
+    }
+
+    const stateChanged = cue.id !== lastRenderedCueId || translation !== lastRenderedText;
+    if (stateChanged) {
+      writeText(root, translation);
+      lastRenderedCueId = cue.id;
+      lastRenderedText = translation;
+    }
+    syncRootPosition(root, captionWindow);
   };
 
-  // 1) Drive rendering off the video clock. timeupdate fires every ~250ms
-  //    which is the natural cadence for caption switching.
-  const video = findVideoElement();
-  const onTime = () => render();
-  if (video) {
-    video.addEventListener('timeupdate', onTime);
-    video.addEventListener('seeking', onTime);
-    video.addEventListener('seeked', onTime);
-  }
-
-  // 2) Watch the caption container for native cue changes (text edits inside
-  //    an existing window, window creation on toggle, etc.). MutationObserver
-  //    catches DOM mutations the video element doesn't know about.
-  const container = document.querySelector<HTMLElement>('.ytp-caption-window-container') ?? document.body;
-  const mo = new MutationObserver(() => render());
-  mo.observe(container, { childList: true, subtree: true, characterData: true });
-
-  render();
+  rafId = requestAnimationFrame(tick);
 
   return {
     setCues: (newCues, newTranslations) => {
       cues = newCues;
       translations = newTranslations;
-      render();
+      cueIndexHint = 0;
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
     },
-    refresh: () => render(),
+    refresh: () => {
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
+    },
     destroy: () => {
       destroyed = true;
-      mo.disconnect();
-      if (video) {
-        video.removeEventListener('timeupdate', onTime);
-        video.removeEventListener('seeking', onTime);
-        video.removeEventListener('seeked', onTime);
-      }
-      // Clean up any lines we injected.
-      document.querySelectorAll(`.${TRANSLATION_CLASS}`).forEach(line => line.remove());
+      if (rafId) cancelAnimationFrame(rafId);
+      document.getElementById(ROOT_ID)?.remove();
     },
   };
 };

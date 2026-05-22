@@ -181,7 +181,7 @@ const isMeaningfulText = (text: string): boolean => {
 };
 
 const containsBlockDescendant = (el: Element): boolean => {
-  for (const child of el.children) {
+  for (const child of Array.from(el.children)) {
     if (SKIP_TAGS.has(child.tagName)) continue;
     if (BLOCK_DEFAULT_TAGS.has(child.tagName)) return true;
     if (containsBlockDescendant(child)) return true;

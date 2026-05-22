@@ -27,6 +27,7 @@ export const registerYouTubeWatcher = (): void => {
   chrome.webRequest.onBeforeRequest.addListener(details => {
     if (details.tabId < 0) return;
     if (!details.url) return;
+    if (details.initiator?.startsWith(`chrome-extension://${chrome.runtime.id}`)) return;
     // Only forward URLs that actually look like a track fetch (have a `lang`
     // or `caps` query) — YouTube hits the endpoint for other purposes too.
     if (!/[?&](lang|tlang|caps|v)=/.test(details.url)) return;

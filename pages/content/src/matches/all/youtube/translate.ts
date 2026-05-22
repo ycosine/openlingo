@@ -36,6 +36,7 @@ interface TranslateSession {
 }
 
 const newSessionId = (): string => `yt-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+const YOUTUBE_SUBTITLE_MAX_CONCURRENCY = 2;
 
 const PLAIN_TO_HTML_PLACEHOLDER = /[<>&]/g;
 const escapeForCache = (s: string): string =>
@@ -83,12 +84,15 @@ const startCueTranslation = (cues: Cue[]): TranslateSession => {
   chrome.runtime.onMessage.addListener(handler);
 
   // Fire one big batch. The background translator chunks it down to fit each
-  // provider's per-request limits and runs them with its own concurrency cap.
+  // provider's per-request limits; subtitles ask for a gentler cap because a
+  // full video can otherwise create an avoidable provider-side rate spike.
   const units = cues.map(c => ({ id: String(c.id), html: escapeForCache(c.text) }));
-  chrome.runtime.sendMessage({ type: 'TR_TRANSLATE_BATCH', sessionId, units }).catch(err => {
-    chrome.runtime.onMessage.removeListener(handler);
-    resolveFinished({ ok: false, error: String(err) });
-  });
+  chrome.runtime
+    .sendMessage({ type: 'TR_TRANSLATE_BATCH', sessionId, units, maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY })
+    .catch(err => {
+      chrome.runtime.onMessage.removeListener(handler);
+      resolveFinished({ ok: false, error: String(err) });
+    });
 
   const cancel = () => {
     if (cancelled) return;
