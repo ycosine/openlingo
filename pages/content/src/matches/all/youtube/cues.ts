@@ -28,6 +28,23 @@ interface Json3Track {
   events?: Json3Event[];
 }
 
+interface TranscriptRequest {
+  apiKey: string;
+  context: unknown;
+  params: string;
+}
+
+interface TextValue {
+  simpleText?: string;
+  runs?: Array<{ text?: string }>;
+}
+
+interface TranscriptCueRenderer {
+  cue?: TextValue;
+  startOffsetMs?: string | number;
+  durationMs?: string | number;
+}
+
 interface FetchCuesOptions {
   filterAmbient: boolean;
   basicSegmentation: boolean;
@@ -54,6 +71,44 @@ const buildJson3Url = (rawUrl: string, opts: { dropTlang?: boolean } = {}): stri
   } catch {
     return rawUrl;
   }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const textFromValue = (value: TextValue | undefined): string => {
+  if (!value) return '';
+  if (typeof value.simpleText === 'string') return value.simpleText;
+  return (value.runs ?? []).map(run => run.text ?? '').join('');
+};
+
+const numberFromValue = (value: string | number | undefined): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const collectTranscriptCueRenderers = (value: unknown, out: TranscriptCueRenderer[]): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) collectTranscriptCueRenderers(item, out);
+    return;
+  }
+  if (!isRecord(value)) return;
+  const renderer = value.transcriptCueRenderer;
+  if (isRecord(renderer)) out.push(renderer as TranscriptCueRenderer);
+  for (const item of Object.values(value)) collectTranscriptCueRenderers(item, out);
+};
+
+const transcriptParamsCandidates = (params: string): string[] => {
+  const candidates = [params];
+  try {
+    const decoded = decodeURIComponent(params);
+    if (decoded !== params) candidates.unshift(decoded);
+  } catch {
+    // Keep the raw endpoint params if YouTube ever ships a non-URI string.
+  }
+  return Array.from(new Set(candidates));
 };
 
 /**
@@ -117,6 +172,60 @@ const fetchCues = async (timedtextUrl: string, opts: FetchCuesOptions): Promise<
   return opts.basicSegmentation ? segmentCues(cues) : cues;
 };
 
+const fetchTranscriptCues = async (request: TranscriptRequest, opts: FetchCuesOptions): Promise<Cue[]> => {
+  const contextRecord = isRecord(request.context) ? request.context : {};
+  const client = isRecord(contextRecord.client) ? contextRecord.client : {};
+  const clientName = typeof client.clientName === 'string' ? client.clientName : 'WEB';
+  const clientVersion = typeof client.clientVersion === 'string' ? client.clientVersion : undefined;
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'x-youtube-client-name': clientName === 'WEB' ? '1' : clientName,
+  };
+  if (clientVersion) headers['x-youtube-client-version'] = clientVersion;
+
+  let lastError: Error | null = null;
+  for (const params of transcriptParamsCandidates(request.params)) {
+    try {
+      const res = await fetch(
+        `https://www.youtube.com/youtubei/v1/get_transcript?key=${encodeURIComponent(request.apiKey)}&prettyPrint=false`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify({ context: request.context, params }),
+          signal: opts.signal,
+        },
+      );
+      if (!res.ok) {
+        lastError = new Error(`transcript fetch failed: ${res.status}`);
+        continue;
+      }
+
+      const data = (await res.json()) as unknown;
+      const renderers: TranscriptCueRenderer[] = [];
+      collectTranscriptCueRenderers(data, renderers);
+
+      const cues: Cue[] = [];
+      let idCounter = 0;
+      for (const renderer of renderers) {
+        const startMs = numberFromValue(renderer.startOffsetMs);
+        if (startMs === null) continue;
+        const durationMs = Math.max(numberFromValue(renderer.durationMs) ?? 2500, 300);
+        const text = cleanText(textFromValue(renderer.cue), { filterAmbient: opts.filterAmbient });
+        if (!text) continue;
+        cues.push({ id: idCounter++, startMs, endMs: startMs + durationMs, text });
+      }
+
+      if (cues.length > 0) return opts.basicSegmentation ? segmentCues(cues) : cues;
+      lastError = new Error('transcript response had no cues');
+    } catch (err) {
+      if (opts.signal?.aborted) throw err;
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastError ?? new Error('transcript fetch failed');
+};
+
 const currentVideoId = (): string | null => {
   try {
     const u = new URL(location.href);
@@ -128,5 +237,5 @@ const currentVideoId = (): string | null => {
   }
 };
 
-export type { Cue, FetchCuesOptions };
-export { buildJson3Url, currentVideoId, fetchCues };
+export type { Cue, FetchCuesOptions, TranscriptRequest };
+export { buildJson3Url, currentVideoId, fetchCues, fetchTranscriptCues };

@@ -13,12 +13,12 @@
  * the two flows don't collide.
  */
 
-import { currentVideoId, fetchCues } from './cues.js';
+import { currentVideoId, fetchCues, fetchTranscriptCues } from './cues.js';
 import { createOverlay, updateOverlayStyle } from './overlay.js';
 import { createPlayerButton } from './player-button.js';
 import { startCueTranslation } from './translate.js';
 import { translationSettingsStorage } from '@extension/storage';
-import type { Cue } from './cues.js';
+import type { Cue, TranscriptRequest } from './cues.js';
 import type { OverlayHandle } from './overlay.js';
 import type { ButtonState, PlayerButtonHandle, Status } from './player-button.js';
 import type { TranslateSession } from './translate.js';
@@ -134,13 +134,50 @@ const extractJsonArray = (text: string, marker: string): string | null => {
   return null;
 };
 
+const extractJsonObject = (text: string, marker: string): string | null => {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = text.indexOf('{', markerIndex);
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+};
+
 const isCaptionTrack = (track: unknown): track is CaptionTrack =>
   !!track && typeof track === 'object' && typeof (track as CaptionTrack).baseUrl === 'string';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const pageScriptTexts = (): string[] => Array.from(document.scripts).map(script => script.textContent ?? '');
+
 const readCaptionTracksFromPage = (): CaptionTrack[] => {
   const tracks: CaptionTrack[] = [];
-  for (const script of Array.from(document.scripts)) {
-    const text = script.textContent ?? '';
+  for (const text of pageScriptTexts()) {
     if (!text.includes('"captionTracks"')) continue;
     const json = extractJsonArray(text, '"captionTracks"');
     if (!json) continue;
@@ -173,6 +210,45 @@ const pickCaptionTrackUrl = (): string | null => {
     ? (tracks.find(track => track.kind !== 'asr') ?? tracks[0])
     : tracks[0];
   return preferred.baseUrl ?? null;
+};
+
+const readTranscriptRequestFromPage = (): TranscriptRequest | null => {
+  let apiKey: string | null = null;
+  let context: unknown = null;
+  let params: string | null = null;
+
+  for (const text of pageScriptTexts()) {
+    if (!apiKey) {
+      apiKey = text.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/)?.[1] ?? null;
+    }
+
+    if (!context && text.includes('"INNERTUBE_CONTEXT"')) {
+      const json = extractJsonObject(text, '"INNERTUBE_CONTEXT"');
+      if (json) {
+        try {
+          context = JSON.parse(json) as unknown;
+        } catch {
+          context = null;
+        }
+      }
+    }
+
+    if (!params && text.includes('"getTranscriptEndpoint"')) {
+      const json = extractJsonObject(text, '"getTranscriptEndpoint"');
+      if (json) {
+        try {
+          const endpoint = JSON.parse(json) as unknown;
+          if (isRecord(endpoint) && typeof endpoint.params === 'string') params = endpoint.params;
+        } catch {
+          params = null;
+        }
+      }
+    }
+
+    if (apiKey && context && params) return { apiKey, context, params };
+  }
+
+  return null;
 };
 
 const scheduleTrackDiscovery = (delayMs = 700): void => {
@@ -228,8 +304,9 @@ const statusForActive = (): Status => {
 };
 
 const beginTranslation = async (url: string): Promise<void> => {
-  if (!lastSettings) return;
-  if (!featureOn(lastSettings) || !perVideoEnabled) return;
+  const settings = lastSettings;
+  if (!settings) return;
+  if (!featureOn(settings) || !perVideoEnabled) return;
 
   const videoId = currentVideoId();
   if (!videoId) return;
@@ -253,34 +330,62 @@ const beginTranslation = async (url: string): Promise<void> => {
   };
   active = session;
 
+  const fetchTranscriptFallback = async (): Promise<Cue[] | null> => {
+    const transcriptRequest = readTranscriptRequestFromPage();
+    if (!transcriptRequest) return null;
+    try {
+      const transcriptCues = await fetchTranscriptCues(transcriptRequest, {
+        filterAmbient: settings.filterAmbient,
+        basicSegmentation: settings.youtubeBasicSegmentation,
+        signal: abortFetch.signal,
+      });
+      return transcriptCues.length > 0 ? transcriptCues : null;
+    } catch (err) {
+      if (!abortFetch.signal.aborted) console.warn('[OpenLingo] Failed to fetch YouTube transcript fallback', err);
+      return null;
+    }
+  };
+
   let cues: Cue[];
   try {
     cues = await fetchCues(url, {
-      filterAmbient: lastSettings.filterAmbient,
-      basicSegmentation: lastSettings.youtubeBasicSegmentation,
+      filterAmbient: settings.filterAmbient,
+      basicSegmentation: settings.youtubeBasicSegmentation,
       signal: abortFetch.signal,
     });
   } catch (err) {
     if (abortFetch.signal.aborted) return;
-    if (active === session) active = null;
-    console.warn('[OpenLingo] Failed to fetch YouTube cues', err);
-    setButtonStatus('error', { errorMessage: (err as Error).message });
-    return;
+    const transcriptCues = await fetchTranscriptFallback();
+    if (active !== session || abortFetch.signal.aborted) return;
+    if (transcriptCues) {
+      cues = transcriptCues;
+    } else {
+      if (active === session) active = null;
+      console.warn('[OpenLingo] Failed to fetch YouTube cues', err);
+      setButtonStatus('error', { errorMessage: (err as Error).message });
+      return;
+    }
   }
 
   if (active !== session || abortFetch.signal.aborted) return;
 
   if (cues.length === 0) {
-    session.status = 'no-cues';
-    setButtonStatus('no-cues');
-    return;
+    const transcriptCues = await fetchTranscriptFallback();
+    if (active !== session || abortFetch.signal.aborted) return;
+    if (transcriptCues) {
+      cues = transcriptCues;
+    } else {
+      session.status = 'no-cues';
+      setButtonStatus('no-cues');
+      return;
+    }
   }
 
   const translateSession = startCueTranslation(cues);
   const overlay = createOverlay({
     cues,
     translations: translateSession.translations,
-    subtitleStyle: lastSettings.subtitleStyle,
+    subtitleStyle: settings.subtitleStyle,
   });
   session.status = 'translating';
   session.cues = cues;
