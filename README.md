@@ -1,50 +1,64 @@
 # OpenLingo
 
-Open-source bilingual page translator for Chrome. Translate any web page in place — original above, translation below — using your own DeepL API key.
+把任何网页变成**双语对照**——原文在上，译文在下。用你自己的 DeepL API Key，干净、私密、零订阅。
 
-## Features
+![OpenLingo](docs/screenshot.png)
 
-- One-click bilingual page translation (block paragraphs get block translations, inline links/buttons get inline translations).
-- DeepL Free (`:fx` keys → `api-free.deepl.com`) and DeepL Pro (`api.deepl.com`) auto-detected from the key suffix.
-- Streaming translation: viewport-prioritized batches, 3-way concurrent requests, results inject as they arrive.
-- LRU translation cache (2000 entries, persisted in `chrome.storage.local`) — same page reopened costs zero requests.
-- Provider abstraction (`packages/translation`) — DeepL today, easy to add Google / OpenAI / custom OpenAI-compatible endpoints later.
-- Minimal DOM intrusion: each translation is a single `<span>` sibling (or in-cell append for `<li>/<td>`), italic Georgia, no borders/backgrounds.
+## 它能做什么
 
-## Repo layout
+- **一键双语对照**：点击工具栏图标，整页段落即时多出一行译文，原文保留不动。
+- **段落/行内自适应**：正文段落显示为块级译文；按钮、链接、表格单元里的短语则用行内译文，不破坏排版。
+- **流式翻译**：先翻你正在看的部分，再继续翻下面的内容，不必干等整页加载。
+- **本地缓存**：同一段文字翻过一次就记住了，重新打开页面不再消耗 API 额度。
+- **支持动态页面**：刷出的新内容（无限滚动、SPA 路由切换）也会自动翻译。
+- **一键还原**：再点一下按钮，所有译文消失，页面回到原样。
 
-```
-chrome-extension/        manifest + background service worker (translator orchestration)
-pages/
-  popup/                 toolbar UI: translate / restore button, status, link to options
-  options/               settings page: DeepL API key + target/source language
-  content/               content script: DOM walker, injector, mutation observer
-packages/
-  translation/           provider interface + DeepL implementation
-  storage/               typed wrappers around chrome.storage.local
-  i18n/                  chrome.i18n.getMessage() helper + locale JSON
-  shared/ ui/ env/ hmr/ vite-config/ ...   build & runtime infra
-```
+## 安装
 
-## Run locally
+1. 下载本仓库的 `dist.zip`（或自己 build，见最底下）并解压。
+2. 打开 Chrome，访问 `chrome://extensions`。
+3. 右上角打开**开发者模式**。
+4. 点**加载已解压的扩展程序**，选中解压出来的 `dist/` 目录。
+
+Firefox 用户：用 `dist-firefox.zip`，在 `about:debugging` 里加载临时附加组件。
+
+## 配置 DeepL Key
+
+1. 去 [DeepL API](https://www.deepl.com/pro-api) 注册账号，拿到 API Key。
+   - **免费版** Key 以 `:fx` 结尾，每月 50 万字符免费额度。
+   - **Pro 版** Key 没有 `:fx` 后缀。
+2. 点扩展图标 → **设置**（或右键扩展图标 → 选项）。
+3. 粘贴 API Key，选目标语言（默认中文），点 **Test** 确认连通，再点 **Save**。
+
+API Key 只保存在你本地浏览器里，不会上传到任何第三方服务器。
+
+## 使用
+
+- 想翻译当前页 → 点工具栏的 OpenLingo 图标 → **Translate**。
+- 想恢复原样 → 再点一下，按钮变成 **Restore**。
+- 换语言或换 Key → 进设置页改即可，下次翻译生效。
+
+## 常见问题
+
+**为什么有些地方没翻译？**
+代码块、`<pre>` 内容、纯数字、已经是目标语言的段落会被跳过——这是故意的。
+
+**额度用完了怎么办？**
+DeepL 会返回 456 错误。换一个 Key，或者等下个月重置。本地缓存里已经翻过的内容仍可继续显示。
+
+**会泄漏我的浏览数据吗？**
+扩展只在你**主动点击翻译**时才发送当前页面的文本到 DeepL。不点不发。设置和缓存都存在 `chrome.storage.local`，不同步、不上传。
+
+## 自己构建（可选）
 
 ```bash
 pnpm install
-pnpm dev        # turbo watch — rebuilds dist/ on save, content script HMR
+pnpm build           # 产出 dist/
+pnpm build:firefox   # 产出 dist/（Firefox 版）
+pnpm zip             # 产出 dist.zip
 ```
 
-Then in Chrome: `chrome://extensions` → Developer mode → **Load unpacked** → select `dist/`.
-
-Open the extension's Options page and paste your DeepL API key (Free keys end in `:fx`). Hit **Test** to confirm, then **Save**.
-
-## Build
-
-```bash
-pnpm build           # Chrome
-pnpm build:firefox   # Firefox
-pnpm zip             # Chrome dist.zip
-pnpm zip:firefox     # Firefox dist.zip
-```
+需要 Node 22+ 和 pnpm 10+。
 
 ## License
 
