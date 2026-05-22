@@ -59,11 +59,11 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-bubble {
       position: relative;
-      width: 30px;
-      height: 30px;
-      border-radius: 7px;
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
       background: ${ACCENT};
-      box-shadow: 0 4px 12px ${ACCENT}44, 0 0 0 1px rgba(255,255,255,0.1) inset;
+      box-shadow: 0 4px 14px ${ACCENT}55, 0 0 0 1px rgba(255,255,255,0.12) inset;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -71,19 +71,19 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-bubble svg {
       display: block;
-      width: 22px;
-      height: 22px;
+      width: 28px;
+      height: 28px;
     }
     .openlingo-yt-button-dot {
       position: absolute;
-      top: -1px;
-      right: -1px;
-      width: 8px;
-      height: 8px;
+      top: -2px;
+      right: -2px;
+      width: 10px;
+      height: 10px;
       border-radius: 99px;
       background: #3FA678;
-      border: 1px solid rgba(0,0,0,0.65);
-      box-shadow: 0 0 6px rgba(63,166,120,0.55);
+      border: 1.5px solid rgba(0,0,0,0.75);
+      box-shadow: 0 0 6px rgba(63,166,120,0.6);
     }
     .openlingo-yt-button-dot[data-status="translating"] {
       background: #E2B23F;
@@ -258,9 +258,9 @@ const ensureStyleTag = (): void => {
 
 const speechMarkSvg = (size: number): string => `
   <svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
-    <rect x="2" y="3" width="13" height="10" rx="2.8" fill="#fff" fill-opacity="0.32" />
-    <rect x="7.5" y="9" width="14.5" height="11" rx="2.8" fill="#fff" />
-    <path d="M10.6 19 L9 22.7 L13.8 19.3 Z" fill="#fff" />
+    <path d="M3.5 4 H20.5 A1.5 1.5 0 0 1 22 5.5 V15.5 A1.5 1.5 0 0 1 20.5 17 H11.5 L7 21.2 V17 H3.5 A1.5 1.5 0 0 1 2 15.5 V5.5 A1.5 1.5 0 0 1 3.5 4 Z" fill="#fff"/>
+    <path d="M6.4 13.5 L8.6 7.5 H10.4 L12.6 13.5 H11 L10.5 12 H8.5 L8 13.5 Z M8.85 10.75 H10.15 L9.5 8.85 Z" fill="${ACCENT}"/>
+    <path d="M14.4 13.5 V7.5 H16 V8.6 H18.4 V9.7 H17.6 C17.4 10.6 17.05 11.4 16.55 12.05 C16.95 12.35 17.4 12.6 17.9 12.8 L17.45 13.85 C16.9 13.6 16.4 13.3 15.95 12.95 C15.55 13.3 15.1 13.6 14.6 13.85 L14.15 12.8 C14.6 12.6 15 12.4 15.4 12.1 C14.95 11.5 14.7 10.85 14.55 10.15 H15.65 C15.75 10.55 15.9 10.95 16.15 11.3 C16.45 10.85 16.65 10.3 16.75 9.7 H14.4 Z" fill="${ACCENT}"/>
   </svg>`;
 
 const STATUS_LABEL: Record<Status, string> = {
