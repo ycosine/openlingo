@@ -9,7 +9,7 @@
 
 import type { Cue } from './cues.js';
 import type { CueTranslationMap } from './translate.js';
-import type { SubtitleStyleType } from '@extension/storage';
+import type { SubtitleFontScaleType, SubtitleStyleType } from '@extension/storage';
 
 const STYLE_TAG_ID = 'openlingo-yt-styles';
 const ROOT_ID = 'openlingo-yt-overlay';
@@ -32,6 +32,8 @@ interface OverlayHandle {
   setCues: (cues: Cue[], translations: CueTranslationMap) => void;
   /** Force a repaint on next frame; call when translations arrive. */
   refresh: () => void;
+  /** Update the font-size multiplier without recreating the overlay. */
+  setFontScale: (scale: SubtitleFontScaleType) => void;
   /** Tear down the independent overlay root and cancel the rAF loop. */
   destroy: () => void;
 }
@@ -40,6 +42,7 @@ interface CreateOverlayOptions {
   cues: Cue[];
   translations: CueTranslationMap;
   subtitleStyle: SubtitleStyleType;
+  fontScale: SubtitleFontScaleType;
 }
 
 const ensureStyleTag = (preset: SubtitleStyleType): void => {
@@ -139,7 +142,7 @@ const hideRoot = (root: HTMLElement | null): void => {
   if (root && root.style.display !== 'none') root.style.display = 'none';
 };
 
-const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement): void => {
+const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement, fontScale: number): void => {
   const player = findPlayerElement();
   if (!player) return;
 
@@ -148,7 +151,8 @@ const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement): void =
   const segment = captionWindow.querySelector<HTMLElement>('.ytp-caption-segment') ?? captionWindow;
   const segmentStyle = window.getComputedStyle(segment);
 
-  root.style.fontSize = segmentStyle.fontSize;
+  const segmentFontPx = parseFloat(segmentStyle.fontSize) || 16;
+  root.style.fontSize = `${segmentFontPx * fontScale}px`;
   root.style.lineHeight = segmentStyle.lineHeight;
   root.style.fontWeight = segmentStyle.fontWeight;
   root.style.maxWidth = `${Math.min(Math.max(captionRect.width * 1.35, 360), playerRect.width * 0.86)}px`;
@@ -170,6 +174,7 @@ const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement): void =
 const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   let cues = initial.cues;
   let translations = initial.translations;
+  let fontScale: number = initial.fontScale;
   let destroyed = false;
   let cueIndexHint = 0;
   let lastRenderedCueId: number | null = -1;
@@ -224,7 +229,7 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
       lastRenderedCueId = cue.id;
       lastRenderedText = translation;
     }
-    syncRootPosition(root, captionWindow);
+    syncRootPosition(root, captionWindow, fontScale);
   };
 
   rafId = requestAnimationFrame(tick);
@@ -240,6 +245,9 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     refresh: () => {
       lastRenderedCueId = -1;
       lastRenderedText = '';
+    },
+    setFontScale: scale => {
+      fontScale = scale;
     },
     destroy: () => {
       destroyed = true;

@@ -18,11 +18,15 @@ interface ButtonState {
   status: Status;
   statusText: string;
   errorMessage?: string;
+  /** YouTube CC is off; show the actionable "Turn on captions" callout. */
+  needsCaptions: boolean;
 }
 
 interface ButtonCallbacks {
   onToggleEnabled: (enabled: boolean) => void;
   onOpenOptions: () => void;
+  /** Programmatically click YouTube's CC button (or guide user there). */
+  onEnableCaptions: () => void;
 }
 
 interface PlayerButtonHandle {
@@ -93,6 +97,11 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-dot[data-status="idle"] {
       display: none;
+    }
+    .openlingo-yt-button-dot[data-needs-captions="1"] {
+      display: block;
+      background: #E2B23F;
+      animation: openlingo-pulse 1.4s ease-in-out infinite;
     }
     @keyframes openlingo-pulse {
       0%, 100% { opacity: 1; }
@@ -169,6 +178,50 @@ const ensureStyleTag = (): void => {
       font-family: "Geist Mono", ui-monospace, monospace;
       letter-spacing: 0;
     }
+    .openlingo-yt-menu-callout {
+      margin: 4px 6px 6px;
+      padding: 10px 11px 11px;
+      background: linear-gradient(180deg, rgba(226,178,63,0.18), rgba(226,178,63,0.10));
+      border: 0.5px solid rgba(226,178,63,0.45);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .openlingo-yt-menu-callout-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: #FFD984;
+      line-height: 1.35;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .openlingo-yt-menu-callout-title svg {
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .openlingo-yt-menu-callout-body {
+      font-size: 11px;
+      line-height: 1.45;
+      color: rgba(255,255,255,0.78);
+    }
+    .openlingo-yt-menu-callout-cta {
+      align-self: stretch;
+      border: 0;
+      border-radius: 6px;
+      background: #E2B23F;
+      color: #2A1F00;
+      font: inherit;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 7px 10px;
+      cursor: pointer;
+      transition: filter 0.12s ease;
+    }
+    .openlingo-yt-menu-callout-cta:hover {
+      filter: brightness(1.06);
+    }
     .openlingo-yt-toggle {
       position: relative;
       width: 30px;
@@ -218,6 +271,13 @@ const STATUS_LABEL: Record<Status, string> = {
   error: 'Translation error',
 };
 
+const captionAlertSvg = (size: number): string => `
+  <svg viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true">
+    <path d="M8 1.5 L15 14 L1 14 Z" fill="none" stroke="#FFD984" stroke-width="1.4" stroke-linejoin="round" />
+    <rect x="7.2" y="6" width="1.6" height="4.4" rx="0.6" fill="#FFD984" />
+    <rect x="7.2" y="11.2" width="1.6" height="1.6" rx="0.6" fill="#FFD984" />
+  </svg>`;
+
 const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): PlayerButtonHandle => {
   ensureStyleTag();
 
@@ -236,7 +296,7 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     btn.innerHTML = `
       <span class="openlingo-yt-button-bubble">
         ${speechMarkSvg(22)}
-        <span class="openlingo-yt-button-dot" data-status="${state.status}"></span>
+        <span class="openlingo-yt-button-dot" data-status="${state.status}" data-needs-captions="0"></span>
       </span>
     `;
     btn.addEventListener('click', e => {
@@ -251,7 +311,13 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     const btn = document.getElementById(BUTTON_ID);
     if (!btn) return;
     const dot = btn.querySelector<HTMLElement>('.openlingo-yt-button-dot');
-    if (dot) dot.setAttribute('data-status', state.enabled ? state.status : 'idle');
+    if (dot) {
+      dot.setAttribute('data-status', state.enabled ? state.status : 'idle');
+      const showCaptionsHint =
+        state.enabled && state.needsCaptions && state.status !== 'translating' && state.status !== 'translated';
+      dot.setAttribute('data-needs-captions', showCaptionsHint ? '1' : '0');
+    }
+    btn.title = state.enabled && state.needsCaptions ? 'OpenLingo — turn on YouTube CC to start' : 'OpenLingo';
   };
 
   const removeMenu = (): void => {
@@ -272,6 +338,8 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     const menu = document.createElement('div');
     menu.id = MENU_ID;
     const statusKey = state.enabled ? state.status : 'idle';
+    const showCallout =
+      state.enabled && state.needsCaptions && state.status !== 'translating' && state.status !== 'translated';
     menu.innerHTML = `
       <div class="openlingo-yt-menu-header">
         ${speechMarkSvg(10)}
@@ -283,6 +351,20 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
       ${
         state.status === 'error' && state.errorMessage
           ? `<div class="openlingo-yt-menu-error">${escapeHtml(state.errorMessage)}</div>`
+          : ''
+      }
+      ${
+        showCallout
+          ? `<div class="openlingo-yt-menu-callout">
+              <div class="openlingo-yt-menu-callout-title">
+                ${captionAlertSvg(14)}
+                <span>Turn on YouTube captions to start translating</span>
+              </div>
+              <div class="openlingo-yt-menu-callout-body">
+                OpenLingo translates the captions YouTube provides, so the player's CC button needs to be on for this video.
+              </div>
+              <button type="button" class="openlingo-yt-menu-callout-cta" data-action="enable-captions">Turn on CC</button>
+            </div>`
           : ''
       }
       <button class="openlingo-yt-menu-item" data-action="toggle">
@@ -301,14 +383,20 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
 
     menu.addEventListener('click', e => {
       const target = e.target as HTMLElement;
+      const cta = target.closest<HTMLElement>('[data-action]');
+      const action = cta?.getAttribute('data-action');
+      if (action === 'enable-captions') {
+        callbacks.onEnableCaptions();
+        return;
+      }
       const item = target.closest<HTMLElement>('.openlingo-yt-menu-item');
       if (!item) return;
-      const action = item.getAttribute('data-action');
-      if (action === 'toggle') {
+      const itemAction = item.getAttribute('data-action');
+      if (itemAction === 'toggle') {
         callbacks.onToggleEnabled(!state.enabled);
         menuOpen = false;
         paintMenu();
-      } else if (action === 'options') {
+      } else if (itemAction === 'options') {
         callbacks.onOpenOptions();
         menuOpen = false;
         paintMenu();

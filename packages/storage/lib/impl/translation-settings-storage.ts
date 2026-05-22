@@ -7,6 +7,8 @@ type DisplayStyleType = 'block' | 'replace';
 
 type SubtitleStyleType = 'serif' | 'sans' | 'mono';
 
+type SubtitleFontScaleType = 0.85 | 1 | 1.25 | 1.5;
+
 interface VideoSubtitlesSettingsType {
   /** Master switch — turn the feature on for every supported site. */
   enabled: boolean;
@@ -27,6 +29,9 @@ interface VideoSubtitlesSettingsType {
   filterAmbient: boolean;
   /** Typography preset for the translation overlay line. */
   subtitleStyle: SubtitleStyleType;
+  /** Scale factor applied to the translation line on top of the platform's
+   *  own caption font size (so it follows player-size scaling). */
+  subtitleFontScale: SubtitleFontScaleType;
 }
 
 interface TranslationSettingsType {
@@ -47,6 +52,7 @@ const VIDEO_SUBTITLES_DEFAULTS: VideoSubtitlesSettingsType = {
   preferHumanCaptions: true,
   filterAmbient: true,
   subtitleStyle: 'serif',
+  subtitleFontScale: 1,
 };
 
 const DEFAULTS: TranslationSettingsType = {
@@ -99,5 +105,11 @@ const translationSettingsStorage: BaseStorageType<TranslationSettingsType> = {
   getSnapshot: () => normalize(baseStorage.getSnapshot()),
 };
 
-export type { ProviderIdType, SubtitleStyleType, VideoSubtitlesSettingsType, TranslationSettingsType };
+export type {
+  ProviderIdType,
+  SubtitleStyleType,
+  SubtitleFontScaleType,
+  VideoSubtitlesSettingsType,
+  TranslationSettingsType,
+};
 export { translationSettingsStorage, VIDEO_SUBTITLES_DEFAULTS };

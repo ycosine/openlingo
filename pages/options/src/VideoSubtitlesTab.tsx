@@ -1,6 +1,6 @@
 import { useStorage } from '@extension/shared';
 import { translationSettingsStorage } from '@extension/storage';
-import type { SubtitleStyleType, VideoSubtitlesSettingsType } from '@extension/storage';
+import type { SubtitleFontScaleType, SubtitleStyleType, VideoSubtitlesSettingsType } from '@extension/storage';
 import type { CSSProperties, ReactNode } from 'react';
 
 const ACCENT = '#0F4F4A';
@@ -90,6 +90,55 @@ const Row = ({
   </div>
 );
 
+const FONT_SCALE_OPTIONS: Array<{ id: SubtitleFontScaleType; label: string }> = [
+  { id: 0.85, label: 'S' },
+  { id: 1, label: 'M' },
+  { id: 1.25, label: 'L' },
+  { id: 1.5, label: 'XL' },
+];
+
+const FontScaleSegmented = ({
+  value,
+  onChange,
+}: {
+  value: SubtitleFontScaleType;
+  onChange: (v: SubtitleFontScaleType) => void;
+}) => (
+  <div
+    style={{
+      display: 'flex',
+      padding: 2,
+      background: 'rgba(15,79,74,0.08)',
+      borderRadius: 7,
+      gap: 1,
+    }}>
+    {FONT_SCALE_OPTIONS.map(o => {
+      const active = value === o.id;
+      return (
+        <button
+          type="button"
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          style={{
+            border: 0,
+            fontFamily: 'inherit',
+            padding: '4px 10px',
+            borderRadius: 5,
+            cursor: 'pointer',
+            fontSize: 11.5,
+            fontWeight: 500,
+            background: active ? '#FFFFFF' : 'transparent',
+            color: active ? INK : INK_SOFT,
+            boxShadow: active ? '0 1px 2px rgba(15,79,74,0.12)' : 'none',
+            minWidth: 32,
+          }}>
+          {o.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
 const StyleSegmented = ({
   value,
   onChange,
@@ -138,7 +187,7 @@ const StyleSegmented = ({
   );
 };
 
-const PreviewPlayer = ({ style }: { style: SubtitleStyleType }) => {
+const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontScale: SubtitleFontScaleType }) => {
   const fontStack =
     style === 'serif'
       ? 'Georgia, "Times New Roman", serif'
@@ -204,7 +253,7 @@ const PreviewPlayer = ({ style }: { style: SubtitleStyleType }) => {
             fontFamily: fontStack,
             fontStyle: italic,
             opacity: 0.9,
-            fontSize: 13,
+            fontSize: 13 * fontScale,
             lineHeight: 1.35,
             textShadow: '0 1px 2px rgba(0,0,0,0.5)',
           }}>
@@ -235,7 +284,7 @@ const VideoSubtitlesTab = () => {
           Adds a translation under the original line while a video plays. Works on YouTube once the player&apos;s own
           captions are turned on.
         </div>
-        <PreviewPlayer style={v.subtitleStyle} />
+        <PreviewPlayer style={v.subtitleStyle} fontScale={v.subtitleFontScale} />
       </div>
 
       <Card title="Video subtitles">
@@ -277,6 +326,13 @@ const VideoSubtitlesTab = () => {
           title="Subtitle style"
           hint="Typography applied to the translated line. Original line always follows the platform's own caption style."
           control={<StyleSegmented value={v.subtitleStyle} onChange={val => update({ subtitleStyle: val })} />}
+        />
+        <Row
+          title="Subtitle font size"
+          hint="Scales the translated line on top of the platform's own caption size. S = 85% · M = 100% · L = 125% · XL = 150%."
+          control={
+            <FontScaleSegmented value={v.subtitleFontScale} onChange={val => update({ subtitleFontScale: val })} />
+          }
         />
       </Card>
 

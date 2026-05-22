@@ -56,6 +56,8 @@ let perVideoEnabled = true;
 let perVideoId: string | null = null;
 let lastTimedtextUrl: string | null = null;
 let unsubscribeSettings: (() => void) | null = null;
+let captionsOn = false;
+let captionsWatchTimer = 0;
 
 const GLOBAL_KEY = '__openlingoYouTubeSubtitles';
 
@@ -91,13 +93,43 @@ const featureOn = (settings: VideoSubtitlesSettingsType): boolean =>
 
 const setButtonStatus = (status: Status, opts: { statusText?: string; errorMessage?: string } = {}): void => {
   if (!button) return;
+  const enabled = !!(lastSettings && featureOn(lastSettings) && perVideoEnabled);
+  const noTrack = !lastTimedtextUrl && !active;
   const patch: Partial<ButtonState> = {
-    enabled: !!(lastSettings && featureOn(lastSettings) && perVideoEnabled),
+    enabled,
     status,
+    needsCaptions: enabled && noTrack && !captionsOn,
   };
   if (opts.statusText !== undefined) patch.statusText = opts.statusText;
   if (opts.errorMessage !== undefined) patch.errorMessage = opts.errorMessage;
   button.setState(patch);
+};
+
+const readCaptionsOn = (): boolean => {
+  const btn = document.querySelector<HTMLElement>('.ytp-subtitles-button.ytp-button');
+  if (!btn) return false;
+  return btn.getAttribute('aria-pressed') === 'true';
+};
+
+const refreshCaptionsState = (): void => {
+  const next = readCaptionsOn();
+  if (next === captionsOn) return;
+  captionsOn = next;
+  setButtonStatus(statusForActive());
+};
+
+const enableYouTubeCaptions = (): void => {
+  const btn = document.querySelector<HTMLElement>('.ytp-subtitles-button.ytp-button');
+  if (!btn) return;
+  if (btn.getAttribute('aria-pressed') === 'true') {
+    captionsOn = true;
+    setButtonStatus(statusForActive());
+    return;
+  }
+  btn.click();
+  // YouTube updates aria-pressed synchronously, but the timedtext request lags
+  // a beat — re-check shortly so the UI reflects the new state.
+  window.setTimeout(refreshCaptionsState, 50);
 };
 
 const statusForActive = (): Status => {
@@ -161,6 +193,7 @@ const beginTranslation = async (url: string): Promise<void> => {
     cues,
     translations: translateSession.translations,
     subtitleStyle: lastSettings.subtitleStyle,
+    fontScale: lastSettings.subtitleFontScale,
   });
   session.status = 'translating';
   session.cues = cues;
@@ -219,10 +252,11 @@ const onTogglePerVideo = (enabled: boolean): void => {
     setButtonStatus('idle', { statusText: '', errorMessage: '' });
     return;
   }
+  refreshCaptionsState();
   if (lastTimedtextUrl) {
     void beginTranslation(lastTimedtextUrl);
   } else {
-    setButtonStatus('idle', { statusText: 'Turn on CC to start' });
+    setButtonStatus('idle', { statusText: captionsOn ? '' : 'Turn on CC to start' });
   }
 };
 
@@ -233,11 +267,12 @@ const onOpenOptions = (): void => {
 const ensureButton = (): void => {
   if (button) return;
   button = createPlayerButton(
-    { onToggleEnabled: onTogglePerVideo, onOpenOptions },
+    { onToggleEnabled: onTogglePerVideo, onOpenOptions, onEnableCaptions: enableYouTubeCaptions },
     {
       enabled: !!(lastSettings && featureOn(lastSettings) && perVideoEnabled),
       status: 'idle',
       statusText: '',
+      needsCaptions: false,
     },
   );
 };
@@ -247,6 +282,9 @@ const applySettings = (settings: VideoSubtitlesSettingsType): void => {
   lastSettings = settings;
   if (previous && previous.subtitleStyle !== settings.subtitleStyle) {
     updateOverlayStyle(settings.subtitleStyle);
+  }
+  if (previous && previous.subtitleFontScale !== settings.subtitleFontScale) {
+    active?.overlay?.setFontScale(settings.subtitleFontScale);
   }
   if (!featureOn(settings)) {
     cancelActive();
@@ -277,6 +315,11 @@ const initYouTubeSubtitles = (): void => {
   document.addEventListener('yt-navigate-finish', onNavigate, true);
   document.addEventListener('yt-page-data-updated', onNavigate, true);
 
+  // YouTube doesn't fire a dedicated event when the user toggles CC, so poll
+  // the subtitles button's aria-pressed at a low frequency to keep the prompt
+  // in sync.
+  captionsWatchTimer = window.setInterval(refreshCaptionsState, 800);
+
   lastNavVideoId = currentVideoId();
   perVideoId = lastNavVideoId;
   getGlobal()[GLOBAL_KEY] = { destroy: destroyYouTubeSubtitles };
@@ -289,6 +332,10 @@ const destroyYouTubeSubtitles = (): void => {
   button = null;
   unsubscribeSettings?.();
   unsubscribeSettings = null;
+  if (captionsWatchTimer) {
+    window.clearInterval(captionsWatchTimer);
+    captionsWatchTimer = 0;
+  }
   chrome.runtime.onMessage.removeListener(onRuntimeMessage);
   document.removeEventListener('yt-navigate-finish', onNavigate, true);
   document.removeEventListener('yt-page-data-updated', onNavigate, true);
