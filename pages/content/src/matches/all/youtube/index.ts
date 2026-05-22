@@ -29,6 +29,19 @@ interface TimedtextMessage {
   url: string;
 }
 
+interface CaptionTrackName {
+  simpleText?: string;
+  runs?: Array<{ text?: string }>;
+}
+
+interface CaptionTrack {
+  baseUrl?: string;
+  languageCode?: string;
+  kind?: string;
+  name?: CaptionTrackName;
+  isTranslatable?: boolean;
+}
+
 type ActiveSessionStatus = 'fetching' | 'translating' | 'translated' | 'no-cues' | 'error';
 
 interface ActiveSession {
@@ -55,9 +68,12 @@ let lastNavVideoId: string | null = null;
 let perVideoEnabled = true;
 let perVideoId: string | null = null;
 let lastTimedtextUrl: string | null = null;
+let trackDiscoveryTimer: number | null = null;
+let trackDiscoveryAttempts = 0;
 let unsubscribeSettings: (() => void) | null = null;
 
 const GLOBAL_KEY = '__openlingoYouTubeSubtitles';
+const MAX_TRACK_DISCOVERY_ATTEMPTS = 8;
 
 type YouTubeSubtitlesWindow = Window & { [GLOBAL_KEY]?: YouTubeSubtitlesGlobal };
 
@@ -76,6 +92,109 @@ const trackKeyFor = (url: string): string => {
   } catch {
     return url;
   }
+};
+
+const clearTrackDiscovery = (): void => {
+  if (trackDiscoveryTimer !== null) {
+    window.clearTimeout(trackDiscoveryTimer);
+    trackDiscoveryTimer = null;
+  }
+};
+
+const extractJsonArray = (text: string, marker: string): string | null => {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const start = text.indexOf('[', markerIndex);
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '[') {
+      depth += 1;
+    } else if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+};
+
+const isCaptionTrack = (track: unknown): track is CaptionTrack =>
+  !!track && typeof track === 'object' && typeof (track as CaptionTrack).baseUrl === 'string';
+
+const readCaptionTracksFromPage = (): CaptionTrack[] => {
+  const tracks: CaptionTrack[] = [];
+  for (const script of Array.from(document.scripts)) {
+    const text = script.textContent ?? '';
+    if (!text.includes('"captionTracks"')) continue;
+    const json = extractJsonArray(text, '"captionTracks"');
+    if (!json) continue;
+    try {
+      const parsed = JSON.parse(json) as unknown;
+      if (Array.isArray(parsed)) tracks.push(...parsed.filter(isCaptionTrack));
+    } catch {
+      // Some YouTube script blobs contain non-JSON snippets; skip and keep scanning.
+    }
+  }
+  return tracks;
+};
+
+const trackMatchesCurrentVideo = (track: CaptionTrack, videoId: string): boolean => {
+  try {
+    const url = new URL(track.baseUrl ?? '', 'https://www.youtube.com');
+    const trackVideoId = url.searchParams.get('v');
+    return !trackVideoId || trackVideoId === videoId;
+  } catch {
+    return true;
+  }
+};
+
+const pickCaptionTrackUrl = (): string | null => {
+  const videoId = currentVideoId();
+  if (!videoId) return null;
+  const tracks = readCaptionTracksFromPage().filter(track => trackMatchesCurrentVideo(track, videoId));
+  if (tracks.length === 0) return null;
+  const preferred = lastSettings?.preferHumanCaptions
+    ? (tracks.find(track => track.kind !== 'asr') ?? tracks[0])
+    : tracks[0];
+  return preferred.baseUrl ?? null;
+};
+
+const scheduleTrackDiscovery = (delayMs = 700): void => {
+  if (!attached || !lastSettings || !featureOn(lastSettings) || !perVideoEnabled || active) return;
+  clearTrackDiscovery();
+  trackDiscoveryTimer = window.setTimeout(() => {
+    trackDiscoveryTimer = null;
+    if (!attached || !lastSettings || !featureOn(lastSettings) || !perVideoEnabled || active) return;
+
+    const discoveredUrl = pickCaptionTrackUrl();
+    if (discoveredUrl) {
+      trackDiscoveryAttempts = 0;
+      lastTimedtextUrl = discoveredUrl;
+      void beginTranslation(discoveredUrl);
+      return;
+    }
+
+    trackDiscoveryAttempts += 1;
+    if (trackDiscoveryAttempts < MAX_TRACK_DISCOVERY_ATTEMPTS) {
+      scheduleTrackDiscovery(900);
+    }
+  }, delayMs);
 };
 
 const cancelActive = (): void => {
@@ -118,6 +237,7 @@ const beginTranslation = async (url: string): Promise<void> => {
   const key = trackKeyFor(url);
   if (active && active.trackKey === key && active.videoId === videoId) return;
 
+  clearTrackDiscovery();
   cancelActive();
   setButtonStatus('translating', { statusText: '', errorMessage: '' });
 
@@ -195,14 +315,21 @@ const onRuntimeMessage = (msg: unknown): void => {
   if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
   if ((msg as { type: string }).type !== 'YT_TIMEDTEXT_URL') return;
   const url = (msg as TimedtextMessage).url;
+  clearTrackDiscovery();
+  trackDiscoveryAttempts = 0;
   lastTimedtextUrl = url;
   void beginTranslation(url);
 };
 
 const onNavigate = (): void => {
   const vid = currentVideoId();
-  if (vid === lastNavVideoId) return;
+  if (vid === lastNavVideoId) {
+    scheduleTrackDiscovery(300);
+    return;
+  }
   lastNavVideoId = vid;
+  clearTrackDiscovery();
+  trackDiscoveryAttempts = 0;
   cancelActive();
   if (vid !== perVideoId) {
     perVideoId = vid;
@@ -210,11 +337,13 @@ const onNavigate = (): void => {
   }
   lastTimedtextUrl = null;
   setButtonStatus('idle', { statusText: '', errorMessage: '' });
+  scheduleTrackDiscovery();
 };
 
 const onTogglePerVideo = (enabled: boolean): void => {
   perVideoEnabled = enabled;
   if (!enabled) {
+    clearTrackDiscovery();
     cancelActive();
     setButtonStatus('idle', { statusText: '', errorMessage: '' });
     return;
@@ -222,7 +351,9 @@ const onTogglePerVideo = (enabled: boolean): void => {
   if (lastTimedtextUrl) {
     void beginTranslation(lastTimedtextUrl);
   } else {
-    setButtonStatus('idle', { statusText: 'Turn on CC to start' });
+    trackDiscoveryAttempts = 0;
+    setButtonStatus('idle', { statusText: 'Finding captions' });
+    scheduleTrackDiscovery(0);
   }
 };
 
@@ -249,11 +380,13 @@ const applySettings = (settings: VideoSubtitlesSettingsType): void => {
     updateOverlayStyle(settings.subtitleStyle);
   }
   if (!featureOn(settings)) {
+    clearTrackDiscovery();
     cancelActive();
     setButtonStatus('idle', { statusText: '', errorMessage: '' });
     return;
   }
   setButtonStatus(statusForActive());
+  scheduleTrackDiscovery();
 };
 
 const initYouTubeSubtitles = (): void => {
@@ -266,6 +399,7 @@ const initYouTubeSubtitles = (): void => {
     if (!attached) return;
     applySettings(s.videoSubtitles);
     ensureButton();
+    scheduleTrackDiscovery();
   });
   unsubscribeSettings = translationSettingsStorage.subscribe(() => {
     const snap = translationSettingsStorage.getSnapshot();
@@ -292,6 +426,8 @@ const destroyYouTubeSubtitles = (): void => {
   chrome.runtime.onMessage.removeListener(onRuntimeMessage);
   document.removeEventListener('yt-navigate-finish', onNavigate, true);
   document.removeEventListener('yt-page-data-updated', onNavigate, true);
+  clearTrackDiscovery();
+  trackDiscoveryAttempts = 0;
   lastTimedtextUrl = null;
   attached = false;
   if (getGlobal()[GLOBAL_KEY]?.destroy === destroyYouTubeSubtitles) {

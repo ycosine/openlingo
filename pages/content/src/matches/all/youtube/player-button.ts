@@ -39,8 +39,8 @@ const ensureStyleTag = (): void => {
       align-items: center;
       justify-content: center;
       vertical-align: top;
-      width: 40px;
-      min-width: 40px;
+      width: 48px;
+      min-width: 48px;
       height: 100%;
       padding: 0;
       border: 0;
@@ -55,8 +55,8 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-bubble {
       position: relative;
-      width: 26px;
-      height: 26px;
+      width: 30px;
+      height: 30px;
       border-radius: 7px;
       background: ${ACCENT};
       box-shadow: 0 4px 12px ${ACCENT}44, 0 0 0 1px rgba(255,255,255,0.1) inset;
@@ -67,8 +67,8 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-bubble svg {
       display: block;
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
     }
     .openlingo-yt-button-dot {
       position: absolute;
@@ -235,7 +235,7 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     btn.title = 'OpenLingo';
     btn.innerHTML = `
       <span class="openlingo-yt-button-bubble">
-        ${speechMarkSvg(18)}
+        ${speechMarkSvg(22)}
         <span class="openlingo-yt-button-dot" data-status="${state.status}"></span>
       </span>
     `;
