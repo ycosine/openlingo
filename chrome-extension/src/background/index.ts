@@ -1,6 +1,6 @@
 import 'webextension-polyfill';
-import { registerTranslatorMessageHandlers } from './translator.js';
-import { registerYouTubeWatcher } from './youtube-watcher.js';
+import { registerTranslatorMessageHandlers } from './translator';
+import { registerYouTubeWatcher } from './youtube-watcher';
 
 registerTranslatorMessageHandlers();
 registerYouTubeWatcher();
