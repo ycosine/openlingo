@@ -13,6 +13,8 @@ const STYLE_TAG_ID = 'openlingo-yt-button-styles';
 
 type Status = 'idle' | 'translating' | 'translated' | 'no-cues' | 'error';
 
+type CaptionSource = 'ai' | 'human' | null;
+
 interface ButtonState {
   enabled: boolean;
   status: Status;
@@ -20,6 +22,10 @@ interface ButtonState {
   errorMessage?: string;
   /** YouTube CC is off; show the actionable "Turn on captions" callout. */
   needsCaptions: boolean;
+  /** Which kind of captions feed the translation — drives the menu header. */
+  captionSource: CaptionSource;
+  /** Download .srt is only meaningful once translations have arrived. */
+  canDownloadSrt: boolean;
 }
 
 interface ButtonCallbacks {
@@ -27,6 +33,10 @@ interface ButtonCallbacks {
   onOpenOptions: () => void;
   /** Programmatically click YouTube's CC button (or guide user there). */
   onEnableCaptions: () => void;
+  /** Hide the OL button for the rest of this video. */
+  onHideButton: () => void;
+  /** Export the active session as an .srt file. */
+  onDownloadSrt: () => void;
 }
 
 interface PlayerButtonHandle {
@@ -59,27 +69,29 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-bubble {
       position: relative;
-      width: 38px;
-      height: 38px;
-      border-radius: 10px;
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
       background: ${ACCENT};
-      box-shadow: 0 4px 14px ${ACCENT}55, 0 0 0 1px rgba(255,255,255,0.12) inset;
+      box-shadow: 0 4px 14px ${ACCENT}66, 0 0 0 2px rgba(255,255,255,0.10);
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      padding: 1px 6px;
+      box-sizing: border-box;
       transition: transform 0.12s ease;
     }
     .openlingo-yt-button-bubble svg {
       display: block;
-      width: 28px;
-      height: 28px;
+      width: 20px;
+      height: 20px;
     }
     .openlingo-yt-button-dot {
       position: absolute;
       top: -2px;
       right: -2px;
-      width: 10px;
-      height: 10px;
+      width: 9px;
+      height: 9px;
       border-radius: 99px;
       background: #3FA678;
       border: 1.5px solid rgba(0,0,0,0.75);
@@ -110,15 +122,15 @@ const ensureStyleTag = (): void => {
 
     #${MENU_ID} {
       position: absolute;
-      right: 8px;
-      bottom: 56px;
-      width: 260px;
-      background: rgba(20,26,34,0.96);
-      backdrop-filter: blur(16px) saturate(140%);
-      -webkit-backdrop-filter: blur(16px) saturate(140%);
-      border: 0.5px solid rgba(255,255,255,0.08);
+      right: 0;
+      bottom: 44px;
+      width: 240px;
+      box-sizing: border-box;
+      background: rgba(20,26,34,0.95);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
       border-radius: 12px;
-      box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.4);
       padding: 6px;
       color: #fff;
       font-family: "Geist", -apple-system, system-ui, sans-serif;
@@ -135,11 +147,10 @@ const ensureStyleTag = (): void => {
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 10.5px;
+      font-size: 11px;
       color: rgba(255,255,255,0.55);
-      font-family: "Geist Mono", ui-monospace, monospace;
-      letter-spacing: 0;
-      text-transform: uppercase;
+      font-family: "Geist", -apple-system, system-ui, sans-serif;
+      letter-spacing: 0.66px;
     }
     .openlingo-yt-menu-item {
       width: 100%;
@@ -156,8 +167,33 @@ const ensureStyleTag = (): void => {
       font: inherit;
       font-size: 12.5px;
     }
-    .openlingo-yt-menu-item:hover {
+    .openlingo-yt-menu-item:hover:not(:disabled) {
       background: rgba(255,255,255,0.06);
+    }
+    .openlingo-yt-menu-item:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .openlingo-yt-menu-item .openlingo-yt-menu-tail {
+      color: rgba(255,255,255,0.45);
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .openlingo-yt-menu-check {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      background: ${ACCENT};
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .openlingo-yt-menu-check[data-on="0"] {
+      background: rgba(255,255,255,0.08);
+    }
+    .openlingo-yt-menu-check[data-on="0"] svg {
+      visibility: hidden;
     }
     .openlingo-yt-menu-sep {
       height: 1px;
@@ -222,33 +258,6 @@ const ensureStyleTag = (): void => {
     .openlingo-yt-menu-callout-cta:hover {
       filter: brightness(1.06);
     }
-    .openlingo-yt-toggle {
-      position: relative;
-      width: 30px;
-      height: 17px;
-      border-radius: 99px;
-      background: rgba(255,255,255,0.18);
-      transition: background 0.15s;
-      flex-shrink: 0;
-    }
-    .openlingo-yt-toggle[data-on="1"] {
-      background: ${ACCENT};
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-    }
-    .openlingo-yt-toggle-knob {
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 13px;
-      height: 13px;
-      border-radius: 99px;
-      background: #fff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.4);
-      transition: left 0.15s cubic-bezier(.3,.7,.4,1);
-    }
-    .openlingo-yt-toggle[data-on="1"] .openlingo-yt-toggle-knob {
-      left: 15px;
-    }
   `;
   const tag = document.createElement('style');
   tag.id = STYLE_TAG_ID;
@@ -256,19 +265,22 @@ const ensureStyleTag = (): void => {
   document.head.appendChild(tag);
 };
 
-const speechMarkSvg = (size: number): string => `
+const speechMarkSvg = (size: number, opacity: number = 1): string => `
   <svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
-    <path d="M3.5 4 H20.5 A1.5 1.5 0 0 1 22 5.5 V15.5 A1.5 1.5 0 0 1 20.5 17 H11.5 L7 21.2 V17 H3.5 A1.5 1.5 0 0 1 2 15.5 V5.5 A1.5 1.5 0 0 1 3.5 4 Z" fill="#fff"/>
-    <path d="M6.4 13.5 L8.6 7.5 H10.4 L12.6 13.5 H11 L10.5 12 H8.5 L8 13.5 Z M8.85 10.75 H10.15 L9.5 8.85 Z" fill="${ACCENT}"/>
-    <path d="M14.4 13.5 V7.5 H16 V8.6 H18.4 V9.7 H17.6 C17.4 10.6 17.05 11.4 16.55 12.05 C16.95 12.35 17.4 12.6 17.9 12.8 L17.45 13.85 C16.9 13.6 16.4 13.3 15.95 12.95 C15.55 13.3 15.1 13.6 14.6 13.85 L14.15 12.8 C14.6 12.6 15 12.4 15.4 12.1 C14.95 11.5 14.7 10.85 14.55 10.15 H15.65 C15.75 10.55 15.9 10.95 16.15 11.3 C16.45 10.85 16.65 10.3 16.75 9.7 H14.4 Z" fill="${ACCENT}"/>
+    <rect x="2" y="3" width="13" height="10" rx="2.8" fill="#fff" fill-opacity="${0.28 * opacity}" />
+    <rect x="7.5" y="9" width="14.5" height="11" rx="2.8" fill="#fff" fill-opacity="${opacity}" />
+    <path d="M10.6 19 L9 22.7 L13.8 19.3 Z" fill="#fff" fill-opacity="${opacity}" />
   </svg>`;
 
-const STATUS_LABEL: Record<Status, string> = {
-  idle: 'Waiting for captions',
-  translating: 'Translating captions…',
-  translated: 'Bilingual subtitles on',
-  'no-cues': 'No captions available',
-  error: 'Translation error',
+const headerLabelFor = (state: ButtonState): string => {
+  if (!state.enabled) return 'OPENLINGO PAUSED';
+  if (state.status === 'error') return 'TRANSLATION ERROR';
+  if (state.status === 'no-cues') return 'NO CAPTIONS AVAILABLE';
+  if (state.needsCaptions) return 'CAPTIONS OFF';
+  if (state.captionSource === 'ai') return 'USING AI CAPTIONS';
+  if (state.captionSource === 'human') return 'USING HUMAN CAPTIONS';
+  if (state.status === 'translating') return 'TRANSLATING…';
+  return 'WAITING FOR CAPTIONS';
 };
 
 const captionAlertSvg = (size: number): string => `
@@ -295,7 +307,7 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     btn.title = 'OpenLingo';
     btn.innerHTML = `
       <span class="openlingo-yt-button-bubble">
-        ${speechMarkSvg(22)}
+        ${speechMarkSvg(20)}
         <span class="openlingo-yt-button-dot" data-status="${state.status}" data-needs-captions="0"></span>
       </span>
     `;
@@ -337,17 +349,14 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
 
     const menu = document.createElement('div');
     menu.id = MENU_ID;
-    const statusKey = state.enabled ? state.status : 'idle';
     const showCallout =
       state.enabled && state.needsCaptions && state.status !== 'translating' && state.status !== 'translated';
+    const headerLabel = headerLabelFor(state);
     menu.innerHTML = `
       <div class="openlingo-yt-menu-header">
-        ${speechMarkSvg(10)}
-        <span>OpenLingo</span>
+        ${speechMarkSvg(10, 0.6)}
+        <span>${escapeHtml(headerLabel)}</span>
       </div>
-      <div class="openlingo-yt-menu-status">${STATUS_LABEL[statusKey]}${
-        state.statusText ? ` · ${escapeHtml(state.statusText)}` : ''
-      }</div>
       ${
         state.status === 'error' && state.errorMessage
           ? `<div class="openlingo-yt-menu-error">${escapeHtml(state.errorMessage)}</div>`
@@ -368,35 +377,54 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
           : ''
       }
       <button class="openlingo-yt-menu-item" data-action="toggle">
-        <span>Bilingual subtitles for this video</span>
-        <span class="openlingo-yt-toggle" data-on="${state.enabled ? '1' : '0'}">
-          <span class="openlingo-yt-toggle-knob"></span>
+        <span>Bilingual ${state.enabled ? 'on' : 'off'} for this video</span>
+        <span class="openlingo-yt-menu-check" data-on="${state.enabled ? '1' : '0'}">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 12 L10 18 L20 6"/>
+          </svg>
         </span>
+      </button>
+      <button class="openlingo-yt-menu-item" data-action="hide">
+        <span>Hide this button</span>
+      </button>
+      <button class="openlingo-yt-menu-item" data-action="download" ${state.canDownloadSrt ? '' : 'disabled'}>
+        <span>Download .srt</span>
       </button>
       <div class="openlingo-yt-menu-sep"></div>
       <button class="openlingo-yt-menu-item" data-action="options">
-        <span>Open OpenLingo options</span>
-        <span style="color:rgba(255,255,255,0.45); font-size:11px;">→</span>
+        <span>Caption settings…</span>
+        <span class="openlingo-yt-menu-tail">→</span>
       </button>
     `;
     anchor.appendChild(menu);
 
     menu.addEventListener('click', e => {
       const target = e.target as HTMLElement;
-      const cta = target.closest<HTMLElement>('[data-action]');
-      const action = cta?.getAttribute('data-action');
+      const trigger = target.closest<HTMLElement>('[data-action]');
+      if (!trigger) return;
+      if (trigger.hasAttribute('disabled')) return;
+      const action = trigger.getAttribute('data-action');
       if (action === 'enable-captions') {
         callbacks.onEnableCaptions();
         return;
       }
-      const item = target.closest<HTMLElement>('.openlingo-yt-menu-item');
-      if (!item) return;
-      const itemAction = item.getAttribute('data-action');
-      if (itemAction === 'toggle') {
+      if (action === 'toggle') {
         callbacks.onToggleEnabled(!state.enabled);
+        paintMenu();
+        return;
+      }
+      if (action === 'hide') {
+        callbacks.onHideButton();
+        menuOpen = false;
+        return;
+      }
+      if (action === 'download') {
+        callbacks.onDownloadSrt();
         menuOpen = false;
         paintMenu();
-      } else if (itemAction === 'options') {
+        return;
+      }
+      if (action === 'options') {
         callbacks.onOpenOptions();
         menuOpen = false;
         paintMenu();
@@ -452,5 +480,5 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
   };
 };
 
-export type { ButtonState, ButtonCallbacks, PlayerButtonHandle, Status };
+export type { ButtonState, ButtonCallbacks, CaptionSource, PlayerButtonHandle, Status };
 export { createPlayerButton };

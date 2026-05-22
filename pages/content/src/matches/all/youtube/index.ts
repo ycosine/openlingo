@@ -20,7 +20,7 @@ import { startCueTranslation } from './translate.js';
 import { translationSettingsStorage } from '@extension/storage';
 import type { Cue } from './cues.js';
 import type { OverlayHandle } from './overlay.js';
-import type { ButtonState, PlayerButtonHandle, Status } from './player-button.js';
+import type { ButtonState, CaptionSource, PlayerButtonHandle, Status } from './player-button.js';
 import type { TranslateSession } from './translate.js';
 import type { VideoSubtitlesSettingsType } from '@extension/storage';
 
@@ -34,6 +34,7 @@ type ActiveSessionStatus = 'fetching' | 'translating' | 'translated' | 'no-cues'
 interface ActiveSession {
   videoId: string;
   trackKey: string;
+  captionSource: CaptionSource;
   status: ActiveSessionStatus;
   cues: Cue[];
   translateSession: TranslateSession | null;
@@ -58,6 +59,9 @@ let lastTimedtextUrl: string | null = null;
 let unsubscribeSettings: (() => void) | null = null;
 let captionsOn = false;
 let captionsWatchTimer = 0;
+/** Per-video: user explicitly clicked "Hide this button"; suppress re-injection
+ *  until they navigate to a new video. */
+let perVideoHidden = false;
 
 const GLOBAL_KEY = '__openlingoYouTubeSubtitles';
 
@@ -80,6 +84,15 @@ const trackKeyFor = (url: string): string => {
   }
 };
 
+const captionSourceFor = (url: string): CaptionSource => {
+  try {
+    const kind = new URL(url, 'https://www.youtube.com').searchParams.get('kind');
+    return kind === 'asr' ? 'ai' : 'human';
+  } catch {
+    return null;
+  }
+};
+
 const cancelActive = (): void => {
   if (!active) return;
   active.abortFetch.abort();
@@ -95,10 +108,14 @@ const setButtonStatus = (status: Status, opts: { statusText?: string; errorMessa
   if (!button) return;
   const enabled = !!(lastSettings && featureOn(lastSettings) && perVideoEnabled);
   const noTrack = !lastTimedtextUrl && !active;
+  const canDownloadSrt =
+    !!active && active.cues.length > 0 && !!active.translateSession && active.translateSession.translations.size > 0;
   const patch: Partial<ButtonState> = {
     enabled,
     status,
     needsCaptions: enabled && noTrack && !captionsOn,
+    captionSource: active?.captionSource ?? null,
+    canDownloadSrt,
   };
   if (opts.statusText !== undefined) patch.statusText = opts.statusText;
   if (opts.errorMessage !== undefined) patch.errorMessage = opts.errorMessage;
@@ -157,6 +174,7 @@ const beginTranslation = async (url: string): Promise<void> => {
   const session: ActiveSession = {
     videoId,
     trackKey: key,
+    captionSource: captionSourceFor(url),
     status: 'fetching',
     cues: [],
     translateSession: null,
@@ -240,6 +258,8 @@ const onNavigate = (): void => {
   if (vid !== perVideoId) {
     perVideoId = vid;
     perVideoEnabled = true;
+    perVideoHidden = false;
+    ensureButton();
   }
   lastTimedtextUrl = null;
   setButtonStatus('idle', { statusText: '', errorMessage: '' });
@@ -264,15 +284,65 @@ const onOpenOptions = (): void => {
   chrome.runtime.sendMessage({ type: 'OL_OPEN_OPTIONS' }).catch(() => undefined);
 };
 
+const onHideButton = (): void => {
+  perVideoHidden = true;
+  button?.destroy();
+  button = null;
+};
+
+const formatSrtTime = (ms: number): string => {
+  const total = Math.max(0, Math.round(ms));
+  const h = Math.floor(total / 3_600_000);
+  const m = Math.floor((total % 3_600_000) / 60_000);
+  const s = Math.floor((total % 60_000) / 1000);
+  const milli = total % 1000;
+  const pad = (n: number, w: number) => n.toString().padStart(w, '0');
+  return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(milli, 3)}`;
+};
+
+const buildSrt = (cues: Cue[], translations: Map<number, string>): string => {
+  const lines: string[] = [];
+  cues.forEach((cue, i) => {
+    const tr = translations.get(cue.id)?.trim();
+    const body = tr ? `${cue.text}\n${tr}` : cue.text;
+    lines.push(`${i + 1}\n${formatSrtTime(cue.startMs)} --> ${formatSrtTime(cue.endMs)}\n${body}\n`);
+  });
+  return lines.join('\n');
+};
+
+const onDownloadSrt = (): void => {
+  if (!active?.translateSession) return;
+  const srt = buildSrt(active.cues, active.translateSession.translations);
+  const blob = new Blob([srt], { type: 'application/x-subrip;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const safeId = active.videoId.replace(/[^\w-]/g, '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `openlingo-${safeId || 'video'}.srt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 const ensureButton = (): void => {
   if (button) return;
+  if (perVideoHidden) return;
   button = createPlayerButton(
-    { onToggleEnabled: onTogglePerVideo, onOpenOptions, onEnableCaptions: enableYouTubeCaptions },
+    {
+      onToggleEnabled: onTogglePerVideo,
+      onOpenOptions,
+      onEnableCaptions: enableYouTubeCaptions,
+      onHideButton,
+      onDownloadSrt,
+    },
     {
       enabled: !!(lastSettings && featureOn(lastSettings) && perVideoEnabled),
       status: 'idle',
       statusText: '',
       needsCaptions: false,
+      captionSource: null,
+      canDownloadSrt: false,
     },
   );
 };
