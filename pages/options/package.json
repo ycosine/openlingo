@@ -23,7 +23,8 @@
     "@extension/shared": "workspace:*",
     "@extension/storage": "workspace:*",
     "@extension/ui": "workspace:*",
-    "@extension/i18n": "workspace:*"
+    "@extension/i18n": "workspace:*",
+    "@extension/translation": "workspace:*"
   },
   "devDependencies": {
     "@extension/tailwindcss-config": "workspace:*",

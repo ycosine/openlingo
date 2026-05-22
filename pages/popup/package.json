@@ -23,6 +23,7 @@
     "@extension/shared": "workspace:*",
     "@extension/storage": "workspace:*",
     "@extension/i18n": "workspace:*",
+    "@extension/translation": "workspace:*",
     "@extension/ui": "workspace:*"
   },
   "devDependencies": {

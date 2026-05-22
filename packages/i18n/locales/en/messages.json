@@ -5,7 +5,7 @@
   },
   "extensionDescription": {
     "description": "Extension description",
-    "message": "Open-source bilingual page translator powered by DeepL"
+    "message": "Open-source bilingual page translator — Google, DeepL, OpenAI, and OpenAI-compatible providers"
   },
   "displayErrorInfo": {
     "message": "Error occurred"

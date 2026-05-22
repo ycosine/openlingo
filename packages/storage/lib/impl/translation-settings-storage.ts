@@ -1,7 +1,7 @@
 import { createStorage, StorageEnum } from '../base/index.js';
 import type { BaseStorageType } from '../base/index.js';
 
-type ProviderIdType = 'deepl';
+type ProviderIdType = 'google-free' | 'deepl' | 'openai-compatible';
 
 type DisplayStyleType = 'block' | 'replace';
 
@@ -13,14 +13,20 @@ interface TranslationSettingsType {
 }
 
 const DEFAULTS: TranslationSettingsType = {
-  provider: 'deepl',
+  provider: 'google-free',
   targetLang: 'ZH',
   sourceLang: 'auto',
   displayStyle: 'block',
 };
 
-export const translationSettingsStorage: BaseStorageType<TranslationSettingsType> =
-  createStorage<TranslationSettingsType>('translation-settings', DEFAULTS, {
+const translationSettingsStorage: BaseStorageType<TranslationSettingsType> = createStorage<TranslationSettingsType>(
+  'translation-settings',
+  DEFAULTS,
+  {
     storageEnum: StorageEnum.Local,
     liveUpdate: true,
-  });
+  },
+);
+
+export type { ProviderIdType };
+export { translationSettingsStorage };

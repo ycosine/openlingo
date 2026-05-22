@@ -1,5 +1,5 @@
 import { TranslationError } from '../types.js';
-import type { TranslateRequest, TranslationProvider, ValidateResult } from '../types.js';
+import type { ProviderCredential, TranslateRequest, TranslationProvider, ValidateResult } from '../types.js';
 
 const PRO_BASE = 'https://api.deepl.com';
 const FREE_BASE = 'https://api-free.deepl.com';
@@ -12,6 +12,8 @@ export const createDeepLProvider = (apiKey: string): TranslationProvider => ({
   id: 'deepl',
   maxTextsPerRequest: 10,
   softMaxCharsPerRequest: 8_000,
+  preservesHtml: true,
+  credentialFields: ['apiKey'],
 
   async translate(req: TranslateRequest): Promise<string[]> {
     if (!apiKey) {
@@ -69,8 +71,9 @@ export const createDeepLProvider = (apiKey: string): TranslationProvider => ({
     return data.translations.map(t => t.text);
   },
 
-  async validate(key: string): Promise<ValidateResult> {
-    if (!key.trim()) return { ok: false, message: 'Empty key' };
+  async validate(cred: ProviderCredential): Promise<ValidateResult> {
+    const key = (cred.apiKey ?? '').trim();
+    if (!key) return { ok: false, message: 'Empty key' };
     try {
       const res = await fetch(`${baseFor(key)}/v2/usage`, {
         method: 'GET',

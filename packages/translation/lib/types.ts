@@ -1,4 +1,13 @@
-export type ProviderId = 'deepl';
+export type ProviderId = 'google-free' | 'deepl' | 'openai-compatible';
+
+export type CredentialField = 'apiKey' | 'baseUrl' | 'model' | 'systemPrompt';
+
+export interface ProviderCredential {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  systemPrompt?: string;
+}
 
 export type TagHandling = 'html' | 'xml' | 'none';
 
@@ -20,11 +29,13 @@ export interface TranslationProvider {
   /** Translate a batch of texts. Result length === request.texts.length, same order. */
   translate(req: TranslateRequest): Promise<string[]>;
   /** Cheap auth check — usually hits a usage/account endpoint. */
-  validate(apiKey: string): Promise<ValidateResult>;
-  /** DeepL limit: 50 texts per request. */
+  validate(cred: ProviderCredential): Promise<ValidateResult>;
   maxTextsPerRequest: number;
-  /** Recommended total characters per request to avoid 413/timeouts. */
   softMaxCharsPerRequest: number;
+  /** True if the provider preserves HTML tags natively. Otherwise upstream strips tags before sending. */
+  preservesHtml: boolean;
+  /** Credential fields the provider needs — drives the Options UI form. */
+  credentialFields: CredentialField[];
 }
 
 export class TranslationError extends Error {

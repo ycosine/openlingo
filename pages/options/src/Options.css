@@ -20,3 +20,20 @@ kbd,
 samp {
   font-family: 'Geist Mono', ui-monospace, monospace;
 }
+
+@keyframes ol-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ol-fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

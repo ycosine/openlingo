@@ -5,7 +5,7 @@
   },
   "extensionDescription": {
     "description": "Extension description",
-    "message": "DeepL 기반 오픈소스 이중 언어 페이지 번역기"
+    "message": "오픈소스 이중 언어 페이지 번역기 — Google, DeepL, OpenAI 및 OpenAI 호환 제공자 지원"
   },
   "displayErrorInfo": {
     "message": "오류 발생"

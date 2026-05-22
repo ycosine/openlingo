@@ -390,6 +390,9 @@ importers:
       '@extension/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@extension/translation':
+        specifier: workspace:*
+        version: link:../../packages/translation
       '@extension/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -415,6 +418,9 @@ importers:
       '@extension/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@extension/translation':
+        specifier: workspace:*
+        version: link:../../packages/translation
       '@extension/ui':
         specifier: workspace:*
         version: link:../../packages/ui

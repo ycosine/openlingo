@@ -1,6 +1,6 @@
-import { deepLCredentialsStorage, translationCacheStorage, translationSettingsStorage } from '@extension/storage';
+import { providerCredentialsStorage, translationCacheStorage, translationSettingsStorage } from '@extension/storage';
 import { getProvider, TranslationError } from '@extension/translation';
-import type { TranslationProvider } from '@extension/translation';
+import type { ProviderCredential, ProviderId, TranslationProvider } from '@extension/translation';
 
 interface TranslateUnit {
   id: string;
@@ -20,7 +20,10 @@ interface TranslateCancelRequest {
 
 interface TranslateValidateRequest {
   type: 'TR_VALIDATE_KEY';
-  apiKey: string;
+  providerId?: ProviderId;
+  credential?: ProviderCredential;
+  /** Legacy: callers that still send only apiKey for the current settings provider. */
+  apiKey?: string;
 }
 
 interface TranslateResultMessage {
@@ -92,6 +95,38 @@ const normalizeForCacheKey = (html: string): string =>
 const cacheKey = (providerId: string, sourceLang: string, targetLang: string, html: string): string =>
   `${providerId}|${sourceLang || 'auto'}|${targetLang}|${normalizeForCacheKey(html)}`;
 
+const HTML_TAG_RE = /<[^>]+>/g;
+
+interface PlainConversion {
+  plain: string;
+  tags: string[];
+}
+
+const htmlToPlain = (html: string): PlainConversion => {
+  const tags: string[] = [];
+  const plain = html.replace(HTML_TAG_RE, match => {
+    const idx = tags.length;
+    tags.push(match);
+    return `⦃${idx}⦄`;
+  });
+  return { plain, tags };
+};
+
+const RE_TAG_PLACEHOLDER_FUZZY = /[⦃｛{]\s*(\d+)\s*[⦄｝}]/g;
+const restorePlaceholders = (out: string, tags: string[]): string =>
+  // Allow models to mangle the brackets slightly (e.g. emit { } instead of ⦃ ⦄)
+  out.replace(RE_TAG_PLACEHOLDER_FUZZY, (_m, n) => tags[Number(n)] ?? '');
+
+const missingCredentialFields = (provider: TranslationProvider, cred: ProviderCredential): string[] => {
+  const missing: string[] = [];
+  for (const f of provider.credentialFields) {
+    if (f === 'systemPrompt') continue; // optional
+    const v = cred[f];
+    if (typeof v !== 'string' || v.trim() === '') missing.push(f);
+  }
+  return missing;
+};
+
 interface Batch {
   units: TranslateUnit[];
 }
@@ -135,14 +170,17 @@ const sendToTab = (tabId: number, msg: TranslateResultMessage | TranslateErrorMe
 };
 
 const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<void> => {
-  const [{ apiKey }, settings] = await Promise.all([deepLCredentialsStorage.get(), translationSettingsStorage.get()]);
+  const settings = await translationSettingsStorage.get();
+  const cred = await providerCredentialsStorage.getFor(settings.provider);
+  const provider = getProvider(settings.provider, cred);
 
-  if (!apiKey) {
+  const missing = missingCredentialFields(provider, cred);
+  if (missing.length > 0) {
     sendToTab(tabId, {
       type: 'TR_TRANSLATE_ERROR',
       sessionId: req.sessionId,
       code: 'NO_API_KEY',
-      message: 'DeepL API key is not configured',
+      message: `Missing credentials for ${provider.id}: ${missing.join(', ')}`,
     });
     return;
   }
@@ -150,7 +188,6 @@ const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<v
   const controller = new AbortController();
   sessions.set(req.sessionId, controller);
 
-  const provider = getProvider(settings.provider, apiKey);
   const targetLang = settings.targetLang;
   const sourceLang = settings.sourceLang;
 
@@ -187,19 +224,36 @@ const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<v
       batches,
       async batch => {
         if (controller.signal.aborted) return;
-        const texts = batch.units.map(u => u.html);
+
+        let texts: string[];
+        let tagsPerUnit: string[][] | null = null;
+        if (provider.preservesHtml) {
+          texts = batch.units.map(u => u.html);
+        } else {
+          tagsPerUnit = [];
+          texts = batch.units.map(u => {
+            const { plain, tags } = htmlToPlain(u.html);
+            tagsPerUnit!.push(tags);
+            return plain;
+          });
+        }
+
         const translated = await provider.translate({
           texts,
           sourceLang,
           targetLang,
-          tagHandling: 'html',
+          tagHandling: provider.preservesHtml ? 'html' : 'none',
           signal: controller.signal,
         });
 
-        const results = batch.units.map((u, i) => ({ id: u.id, html: translated[i] ?? '' }));
+        const restored = tagsPerUnit
+          ? translated.map((t, i) => restorePlaceholders(t ?? '', tagsPerUnit![i] ?? []))
+          : translated.map(t => t ?? '');
+
+        const results = batch.units.map((u, i) => ({ id: u.id, html: restored[i] ?? '' }));
         const toCache: Record<string, string> = {};
         batch.units.forEach((u, i) => {
-          toCache[cacheKey(provider.id, sourceLang, targetLang, u.html)] = translated[i] ?? '';
+          toCache[cacheKey(provider.id, sourceLang, targetLang, u.html)] = restored[i] ?? '';
         });
         void translationCacheStorage.putMany(toCache);
 
@@ -233,8 +287,11 @@ const handleCancel = (req: TranslateCancelRequest): void => {
 
 const handleValidate = async (req: TranslateValidateRequest): Promise<{ ok: boolean; message?: string }> => {
   const settings = await translationSettingsStorage.get();
-  const provider = getProvider(settings.provider, req.apiKey);
-  return provider.validate(req.apiKey);
+  const providerId = req.providerId ?? settings.provider;
+  const stored = await providerCredentialsStorage.getFor(providerId);
+  const credential: ProviderCredential = req.credential ?? (req.apiKey ? { ...stored, apiKey: req.apiKey } : stored);
+  const provider = getProvider(providerId, credential);
+  return provider.validate(credential);
 };
 
 export const registerTranslatorMessageHandlers = (): void => {
