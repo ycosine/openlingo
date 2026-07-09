@@ -15,6 +15,7 @@
     "clean": "pnpm clean:bundle && pnpm clean:turbo && pnpm clean:node_modules",
     "build": "tsx build.mts",
     "dev": "tsx build.mts",
+    "test": "vitest run",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
     "format": "prettier . --write --ignore-path ../../.prettierignore",
@@ -28,6 +29,8 @@
   "devDependencies": {
     "@extension/hmr": "workspace:*",
     "@extension/tsconfig": "workspace:*",
-    "@extension/vite-config": "workspace:*"
+    "@extension/vite-config": "workspace:*",
+    "happy-dom": "^18.0.1",
+    "vitest": "^3.2.4"
   }
 }
