@@ -1,23 +1,14 @@
-import { providerCredentialsStorage, translationCacheStorage, translationSettingsStorage } from '@extension/storage';
-import { getProvider, TranslationError } from '@extension/translation';
-import type { ProviderCredential, ProviderId, TranslationProvider } from '@extension/translation';
-
-interface TranslateUnit {
-  id: string;
-  html: string;
-}
-
-interface TranslateBatchRequest {
-  type: 'TR_TRANSLATE_BATCH';
-  sessionId: string;
-  units: TranslateUnit[];
-  maxConcurrency?: number;
-}
-
-interface TranslateCancelRequest {
-  type: 'TR_TRANSLATE_CANCEL';
-  sessionId: string;
-}
+import { TranslateSession } from './translate-session';
+import { providerCredentialsStorage, translationSettingsStorage } from '@extension/storage';
+import { getProvider } from '@extension/translation';
+import type {
+  TranslateBackoffMessage,
+  TranslateBatchRequest,
+  TranslateCancelRequest,
+  TranslateErrorMessage,
+  TranslateResultMessage,
+} from './translate-session';
+import type { ProviderCredential, ProviderId } from '@extension/translation';
 
 interface TranslateValidateRequest {
   type: 'TR_VALIDATE_KEY';
@@ -27,267 +18,18 @@ interface TranslateValidateRequest {
   apiKey?: string;
 }
 
-interface TranslateResultMessage {
-  type: 'TR_TRANSLATE_RESULT';
-  sessionId: string;
-  results: Array<{ id: string; html: string }>;
-  done: boolean;
-}
+type Outbound = TranslateResultMessage | TranslateErrorMessage | TranslateBackoffMessage;
 
-interface TranslateErrorMessage {
-  type: 'TR_TRANSLATE_ERROR';
-  sessionId: string;
-  code: string;
-  message: string;
-}
+/** Sessions keyed by port; one session object per connected content script. */
+const portSessions = new Map<chrome.runtime.Port, TranslateSession>();
 
-const MAX_CONCURRENCY = 3;
+/** Fallback sessions for legacy sendMessage batches (sessionId → session). */
+const legacySessions = new Map<string, { session: TranslateSession; tabId: number }>();
 
-const sessions = new Map<string, AbortController>();
-
-const TRACKING_PARAM_KEYS = new Set([
-  'fbclid',
-  'gclid',
-  'gbraid',
-  'wbraid',
-  'msclkid',
-  'yclid',
-  'dclid',
-  'mc_cid',
-  'mc_eid',
-  '_ga',
-  '_gl',
-  '_hsenc',
-  '_hsmi',
-  'ref',
-  'ref_src',
-  'referrer',
-  'igshid',
-  'spm',
-  'src',
-]);
-
-const stripTrackingFromUrl = (url: string): string => {
-  try {
-    const u = new URL(url, 'https://x.invalid');
-    for (const k of [...u.searchParams.keys()]) {
-      const lc = k.toLowerCase();
-      if (lc.startsWith('utm_') || TRACKING_PARAM_KEYS.has(lc)) {
-        u.searchParams.delete(k);
-      }
-    }
-    return u.protocol === 'https:' && u.hostname === 'x.invalid' ? url : u.toString();
-  } catch {
-    return url;
-  }
-};
-
-const NOISE_ATTR_RE = /\s+(class|id|style|data-[\w-]+)\s*=\s*("[^"]*"|'[^']*')/gi;
-const URL_ATTR_RE = /\s+(href|src)\s*=\s*"([^"]*)"/gi;
-const WHITESPACE_RE = /\s+/g;
-
-const normalizeForCacheKey = (html: string): string =>
-  html
-    .replace(NOISE_ATTR_RE, '')
-    .replace(URL_ATTR_RE, (_m, attr, url) => ` ${attr}="${stripTrackingFromUrl(url)}"`)
-    .replace(WHITESPACE_RE, ' ')
-    .trim();
-
-const cacheKey = (providerId: string, sourceLang: string, targetLang: string, html: string): string =>
-  `${providerId}|${sourceLang || 'auto'}|${targetLang}|${normalizeForCacheKey(html)}`;
-
-const HTML_TAG_RE = /<[^>]+>/g;
-
-interface PlainConversion {
-  plain: string;
-  tags: string[];
-}
-
-const htmlToPlain = (html: string): PlainConversion => {
-  const tags: string[] = [];
-  const plain = html.replace(HTML_TAG_RE, match => {
-    const idx = tags.length;
-    tags.push(match);
-    return `⦃${idx}⦄`;
-  });
-  return { plain, tags };
-};
-
-const RE_TAG_PLACEHOLDER_FUZZY = /[⦃｛{]\s*(\d+)\s*[⦄｝}]/g;
-const restorePlaceholders = (out: string, tags: string[]): string =>
-  // Allow models to mangle the brackets slightly (e.g. emit { } instead of ⦃ ⦄)
-  out.replace(RE_TAG_PLACEHOLDER_FUZZY, (_m, n) => tags[Number(n)] ?? '');
-
-const missingCredentialFields = (provider: TranslationProvider, cred: ProviderCredential): string[] => {
-  const missing: string[] = [];
-  for (const f of provider.credentialFields) {
-    if (f === 'systemPrompt') continue; // optional
-    const v = cred[f];
-    if (typeof v !== 'string' || v.trim() === '') missing.push(f);
-  }
-  return missing;
-};
-
-interface Batch {
-  units: TranslateUnit[];
-}
-
-const buildBatches = (units: TranslateUnit[], provider: TranslationProvider): Batch[] => {
-  const batches: Batch[] = [];
-  let cur: TranslateUnit[] = [];
-  let curChars = 0;
-  for (const u of units) {
-    const len = u.html.length;
-    if (
-      cur.length >= provider.maxTextsPerRequest ||
-      (cur.length > 0 && curChars + len > provider.softMaxCharsPerRequest)
-    ) {
-      batches.push({ units: cur });
-      cur = [];
-      curChars = 0;
-    }
-    cur.push(u);
-    curChars += len;
-  }
-  if (cur.length > 0) batches.push({ units: cur });
-  return batches;
-};
-
-const runWithConcurrency = async <T, R>(items: T[], worker: (item: T) => Promise<R>, limit: number): Promise<void> => {
-  let idx = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (idx < items.length) {
-      const myIdx = idx++;
-      await worker(items[myIdx]);
-    }
-  });
-  await Promise.all(runners);
-};
-
-const sendToTab = (tabId: number, msg: TranslateResultMessage | TranslateErrorMessage): void => {
+const sendToTab = (tabId: number, msg: Outbound): void => {
   chrome.tabs.sendMessage(tabId, msg).catch(() => {
     // Tab may have navigated away — ignore.
   });
-};
-
-const handleBatch = async (req: TranslateBatchRequest, tabId: number): Promise<void> => {
-  const settings = await translationSettingsStorage.get();
-  const cred = await providerCredentialsStorage.getFor(settings.provider);
-  const provider = getProvider(settings.provider, cred);
-
-  const missing = missingCredentialFields(provider, cred);
-  if (missing.length > 0) {
-    sendToTab(tabId, {
-      type: 'TR_TRANSLATE_ERROR',
-      sessionId: req.sessionId,
-      code: 'NO_API_KEY',
-      message: `Missing credentials for ${provider.id}: ${missing.join(', ')}`,
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  sessions.set(req.sessionId, controller);
-
-  const targetLang = settings.targetLang;
-  const sourceLang = settings.sourceLang;
-
-  const cacheKeys = req.units.map(u => cacheKey(provider.id, sourceLang, targetLang, u.html));
-  const cached = await translationCacheStorage.getMany(cacheKeys);
-
-  const cachedHits: Array<{ id: string; html: string }> = [];
-  const misses: TranslateUnit[] = [];
-  req.units.forEach((u, i) => {
-    const hit = cached[cacheKeys[i]];
-    if (typeof hit === 'string') cachedHits.push({ id: u.id, html: hit });
-    else misses.push(u);
-  });
-
-  if (cachedHits.length > 0) {
-    sendToTab(tabId, {
-      type: 'TR_TRANSLATE_RESULT',
-      sessionId: req.sessionId,
-      results: cachedHits,
-      done: misses.length === 0,
-    });
-  }
-
-  if (misses.length === 0) {
-    sessions.delete(req.sessionId);
-    return;
-  }
-
-  const batches = buildBatches(misses, provider);
-  let remaining = batches.length;
-  const concurrency =
-    typeof req.maxConcurrency === 'number' && Number.isFinite(req.maxConcurrency)
-      ? Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(req.maxConcurrency)))
-      : MAX_CONCURRENCY;
-
-  try {
-    await runWithConcurrency(
-      batches,
-      async batch => {
-        if (controller.signal.aborted) return;
-
-        let texts: string[];
-        let tagsPerUnit: string[][] | null = null;
-        if (provider.preservesHtml) {
-          texts = batch.units.map(u => u.html);
-        } else {
-          tagsPerUnit = [];
-          texts = batch.units.map(u => {
-            const { plain, tags } = htmlToPlain(u.html);
-            tagsPerUnit!.push(tags);
-            return plain;
-          });
-        }
-
-        const translated = await provider.translate({
-          texts,
-          sourceLang,
-          targetLang,
-          tagHandling: provider.preservesHtml ? 'html' : 'none',
-          signal: controller.signal,
-        });
-
-        const restored = tagsPerUnit
-          ? translated.map((t, i) => restorePlaceholders(t ?? '', tagsPerUnit![i] ?? []))
-          : translated.map(t => t ?? '');
-
-        const results = batch.units.map((u, i) => ({ id: u.id, html: restored[i] ?? '' }));
-        const toCache: Record<string, string> = {};
-        batch.units.forEach((u, i) => {
-          toCache[cacheKey(provider.id, sourceLang, targetLang, u.html)] = restored[i] ?? '';
-        });
-        void translationCacheStorage.putMany(toCache);
-
-        remaining--;
-        sendToTab(tabId, {
-          type: 'TR_TRANSLATE_RESULT',
-          sessionId: req.sessionId,
-          results,
-          done: remaining === 0,
-        });
-      },
-      concurrency,
-    );
-  } catch (err) {
-    if (controller.signal.aborted) return;
-    const code = err instanceof TranslationError ? err.code : 'UNKNOWN';
-    const message = (err as Error).message ?? 'Translation failed';
-    sendToTab(tabId, { type: 'TR_TRANSLATE_ERROR', sessionId: req.sessionId, code, message });
-  } finally {
-    sessions.delete(req.sessionId);
-  }
-};
-
-const handleCancel = (req: TranslateCancelRequest): void => {
-  const ctrl = sessions.get(req.sessionId);
-  if (ctrl) {
-    ctrl.abort();
-    sessions.delete(req.sessionId);
-  }
 };
 
 const handleValidate = async (req: TranslateValidateRequest): Promise<{ ok: boolean; message?: string }> => {
@@ -299,21 +41,96 @@ const handleValidate = async (req: TranslateValidateRequest): Promise<{ ok: bool
   return provider.validate(credential);
 };
 
+const attachPortSession = (port: chrome.runtime.Port): void => {
+  let session: TranslateSession | null = null;
+
+  const sink = (msg: Outbound): void => {
+    try {
+      port.postMessage(msg);
+    } catch {
+      // Port gone
+    }
+  };
+
+  port.onMessage.addListener((msg: unknown) => {
+    if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
+    const m = msg as { type: string; sessionId?: string };
+
+    if (m.type === 'TR_TRANSLATE_BATCH') {
+      const req = msg as TranslateBatchRequest;
+      if (!session || session.sessionId !== req.sessionId) {
+        session?.cancel();
+        session = new TranslateSession(req.sessionId, sink);
+        portSessions.set(port, session);
+      }
+      session.enqueue(req.units, req.maxConcurrency);
+      return;
+    }
+
+    if (m.type === 'TR_TRANSLATE_CANCEL') {
+      const req = msg as TranslateCancelRequest;
+      if (session && session.sessionId === req.sessionId) {
+        session.cancel();
+        session = null;
+        portSessions.delete(port);
+      }
+      return;
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    const s = portSessions.get(port);
+    if (s) {
+      s.cancel();
+      portSessions.delete(port);
+    }
+    session = null;
+  });
+};
+
 export const registerTranslatorMessageHandlers = (): void => {
+  // Port channel (primary after P3)
+  chrome.runtime.onConnect.addListener(port => {
+    if (port.name !== 'translate') return;
+    attachPortSession(port);
+  });
+
+  // Legacy sendMessage + validate key
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
     const tabId = sender.tab?.id;
 
     if (msg.type === 'TR_TRANSLATE_BATCH' && tabId !== undefined) {
-      void handleBatch(msg as TranslateBatchRequest, tabId);
+      const req = msg as TranslateBatchRequest;
+      let entry = legacySessions.get(req.sessionId);
+      if (!entry) {
+        const session = new TranslateSession(req.sessionId, m => sendToTab(tabId, m));
+        entry = { session, tabId };
+        legacySessions.set(req.sessionId, entry);
+      }
+      entry.session.enqueue(req.units, req.maxConcurrency);
       sendResponse({ ok: true });
       return;
     }
+
     if (msg.type === 'TR_TRANSLATE_CANCEL') {
-      handleCancel(msg as TranslateCancelRequest);
+      const req = msg as TranslateCancelRequest;
+      const entry = legacySessions.get(req.sessionId);
+      if (entry) {
+        entry.session.cancel();
+        legacySessions.delete(req.sessionId);
+      }
+      // Also cancel matching port sessions
+      for (const [port, session] of portSessions) {
+        if (session.sessionId === req.sessionId) {
+          session.cancel();
+          portSessions.delete(port);
+        }
+      }
       sendResponse({ ok: true });
       return;
     }
+
     if (msg.type === 'TR_VALIDATE_KEY') {
       handleValidate(msg as TranslateValidateRequest).then(sendResponse);
       return true;

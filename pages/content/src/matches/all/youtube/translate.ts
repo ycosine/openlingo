@@ -12,7 +12,6 @@ interface TranslateResultMessage {
   type: 'TR_TRANSLATE_RESULT';
   sessionId: string;
   results: Array<{ id: string; html: string }>;
-  done: boolean;
 }
 
 interface TranslateErrorMessage {
@@ -56,7 +55,6 @@ const startCueTranslation = (cues: Cue[]): TranslateSession => {
     resolveFinished = r;
   });
 
-  let receivedCount = 0;
   let cancelled = false;
 
   const handler = (msg: unknown) => {
@@ -68,10 +66,9 @@ const startCueTranslation = (cues: Cue[]): TranslateSession => {
         const idNum = Number(r.id);
         if (!Number.isFinite(idNum)) continue;
         translations.set(idNum, unescapeFromCache(r.html ?? '').trim());
-        receivedCount++;
       }
       notify();
-      if (m.done && receivedCount >= cues.length) {
+      if (translations.size >= cues.length) {
         chrome.runtime.onMessage.removeListener(handler);
         resolveFinished({ ok: true });
       }
