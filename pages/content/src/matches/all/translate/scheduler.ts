@@ -81,6 +81,21 @@ class TranslateScheduler {
     }
   }
 
+  /** Drop a unit whose source content changed — its translation is stale. */
+  removeUnit(id: string): void {
+    const unit = this.units.get(id);
+    if (!unit) return;
+    removePlaceholder(unit);
+    this.units.delete(id);
+    this.pendingQueue.delete(id);
+    const t = this.retryTimers.get(id);
+    if (t) {
+      window.clearTimeout(t);
+      this.retryTimers.delete(id);
+    }
+    this.intersectionObserver?.unobserve(unit.el);
+  }
+
   private startIntersectionObserver(): void {
     if (this.intersectionObserver) return;
     this.intersectionObserver = new IntersectionObserver(

@@ -7,6 +7,8 @@ export interface PendingUnit {
   el: HTMLElement;
   /** Normalized HTML fragment sent to the translator. */
   html: string;
+  /** Source text (our target nodes excluded) captured at scan time, used to detect real content changes. */
+  sourceText: string;
   placeholder: HTMLElement | null;
   status: UnitStatus;
   retries: number;

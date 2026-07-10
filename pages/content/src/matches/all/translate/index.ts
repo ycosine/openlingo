@@ -1,6 +1,6 @@
-import { MUTATION_DEBOUNCE_MS, SOURCE_ATTR, TARGET_ATTR, TARGET_CLASS } from './constants.js';
-import { clearAllMarks, ensureStyle } from './renderer.js';
-import { scanRoot, scanRoots } from './scanner.js';
+import { MUTATION_DEBOUNCE_MS, SOURCE_ATTR, SOURCE_ID_ATTR, TARGET_ATTR, TARGET_CLASS } from './constants.js';
+import { clearAllMarks, ensureStyle, removeAttachedTargets } from './renderer.js';
+import { scanRoot, scanRoots, textExcludingTargets } from './scanner.js';
 import { TranslateScheduler } from './scheduler.js';
 import { TranslateTransport } from './transport.js';
 import type { PageStatus, TransportInbound } from './types.js';
@@ -14,6 +14,9 @@ const session = {
   mutationObserver: null as MutationObserver | null,
   mutationTimer: 0 as number,
   pendingScanRoots: new Set<Element>(),
+  // Marked sources whose content the page rewrote (re-render / recycled
+  // virtual-list row) — their translation is stale and must be redone.
+  pendingDirtySources: new Set<HTMLElement>(),
 };
 
 const transport = new TranslateTransport();
@@ -44,9 +47,40 @@ const runScan = (root: ParentNode = document.body): number => {
   return units.length;
 };
 
+/**
+ * Invalidate dirty sources: if the text actually changed, drop the unit and its
+ * stale translation, unmark the element, and queue it for a fresh scan.
+ * Unchanged text (cosmetic DOM shuffle) keeps the existing translation.
+ */
+const processDirtySources = (): void => {
+  const dirty = [...session.pendingDirtySources];
+  session.pendingDirtySources.clear();
+  for (const src of dirty) {
+    const id = src.getAttribute(SOURCE_ID_ATTR);
+    if (!src.isConnected) {
+      if (id) scheduler.removeUnit(id);
+      continue;
+    }
+    const unit = id ? scheduler.unitMap.get(id) : undefined;
+    if (unit && textExcludingTargets(src).trim() === unit.sourceText) continue;
+    if (id) scheduler.removeUnit(id);
+    removeAttachedTargets(src);
+    src.removeAttribute(SOURCE_ATTR);
+    src.removeAttribute(SOURCE_ID_ATTR);
+    session.pendingScanRoots.add(src);
+  }
+};
+
 const flushPendingScans = (): void => {
   session.mutationTimer = 0;
-  if (session.status !== 'translated' && session.status !== 'translating') return;
+  if (session.status !== 'translated' && session.status !== 'translating') {
+    session.pendingDirtySources.clear();
+    session.pendingScanRoots.clear();
+    return;
+  }
+
+  processDirtySources();
+
   const roots = [...session.pendingScanRoots];
   session.pendingScanRoots.clear();
   if (roots.length === 0) return;
@@ -63,12 +97,28 @@ const flushPendingScans = (): void => {
   ingestUnits(units);
 };
 
+const scheduleMutationFlush = (): void => {
+  if (session.mutationTimer) return;
+  session.mutationTimer = window.setTimeout(flushPendingScans, MUTATION_DEBOUNCE_MS);
+};
+
 const queueScanTarget = (el: Element): void => {
   if (isOwnMutationNode(el)) return;
   if (el.hasAttribute(SOURCE_ATTR)) return;
   session.pendingScanRoots.add(el);
-  if (session.mutationTimer) return;
-  session.mutationTimer = window.setTimeout(flushPendingScans, MUTATION_DEBOUNCE_MS);
+  scheduleMutationFlush();
+};
+
+const queueDirtySource = (src: HTMLElement): void => {
+  session.pendingDirtySources.add(src);
+  scheduleMutationFlush();
+};
+
+/** Marked source containing this node, or null when unrelated / inside our own target. */
+const findContainingSource = (node: Node): HTMLElement | null => {
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  if (!el) return null;
+  return el.closest(`[${SOURCE_ATTR}="1"]`) as HTMLElement | null;
 };
 
 const startMutationObserver = (): void => {
@@ -77,23 +127,49 @@ const startMutationObserver = (): void => {
     if (session.status !== 'translated' && session.status !== 'translating') return;
 
     for (const rec of records) {
-      if (rec.type === 'childList') {
-        rec.addedNodes.forEach(node => {
-          if (node.nodeType !== Node.ELEMENT_NODE) return;
-          if (isOwnMutationNode(node)) return;
-          queueScanTarget(node as Element);
-        });
-      } else if (rec.type === 'attributes') {
-        const t = rec.target as Element;
-        if (isOwnMutationNode(t)) return;
-        // Attribute flips (class/style/hidden) may reveal previously skipped content.
-        queueScanTarget(t);
+      // Mutations inside one of our translation nodes (placeholder insert /
+      // swap) are our own writes — never trigger scans from them.
+      const recEl = rec.target.nodeType === Node.ELEMENT_NODE ? (rec.target as Element) : rec.target.parentElement;
+      if (recEl?.closest(`[${TARGET_ATTR}="1"]`)) continue;
+
+      if (rec.type === 'characterData') {
+        const src = findContainingSource(rec.target);
+        if (src) queueDirtySource(src);
+        else if (rec.target.parentElement) queueScanTarget(rec.target.parentElement);
+        continue;
       }
+
+      if (rec.type === 'childList') {
+        const foreignAdded = Array.from(rec.addedNodes).filter(n => !isOwnMutationNode(n));
+        const foreignRemoved = Array.from(rec.removedNodes).filter(n => !isOwnMutationNode(n));
+        // Only our own placeholder/translation churn — ignore.
+        if (foreignAdded.length === 0 && foreignRemoved.length === 0) continue;
+
+        const src = findContainingSource(rec.target);
+        if (src) {
+          // Page rewrote content inside a translated unit (recycled row).
+          queueDirtySource(src);
+          continue;
+        }
+        for (const node of foreignAdded) {
+          if (node.nodeType === Node.ELEMENT_NODE) queueScanTarget(node as Element);
+          else if (node.parentElement) queueScanTarget(node.parentElement);
+        }
+        // Pure removal can leave the parent as a fresh paragraph candidate.
+        if (foreignAdded.length === 0 && recEl) queueScanTarget(recEl);
+        continue;
+      }
+
+      // attributes: flips (class/style/hidden) may reveal previously skipped content.
+      const t = rec.target as Element;
+      if (isOwnMutationNode(t)) continue;
+      queueScanTarget(t);
     }
   });
   obs.observe(document.body, {
     childList: true,
     subtree: true,
+    characterData: true,
     attributes: true,
     attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
   });
@@ -110,6 +186,7 @@ const stopMutationObserver = (): void => {
     session.mutationTimer = 0;
   }
   session.pendingScanRoots.clear();
+  session.pendingDirtySources.clear();
 };
 
 const onTransportMessage = (msg: TransportInbound): void => {

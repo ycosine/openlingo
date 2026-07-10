@@ -11,6 +11,7 @@ import {
   serializeUnitHtml,
   shouldSkipAsTargetLanguage,
   stripDiscardPlaceholders,
+  textExcludingTargets,
 } from './scanner.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -83,6 +84,51 @@ describe('serializeUnitHtml', () => {
     expect(html).toMatch(/⦃\d+⦄/);
     expect(stripDiscardPlaceholders(html)).not.toMatch(/⦃/);
     expect(html).not.toContain('<button');
+  });
+});
+
+describe('textExcludingTargets', () => {
+  it('ignores text inside our translation nodes', () => {
+    mount(`
+      <li id="li" data-immersive-source="1">Original item text here
+        <span data-immersive-translated="1" class="immersive-translate-target">这里是译文</span>
+      </li>
+    `);
+    const text = textExcludingTargets(document.getElementById('li')!);
+    expect(text).toContain('Original item text here');
+    expect(text).not.toContain('这里是译文');
+  });
+});
+
+describe('orphaned translation cleanup on rescan', () => {
+  it('removes an orphaned sibling target and does not leak it into the new unit', () => {
+    // Simulates a re-render: the source <p> was re-created (marks lost) but the
+    // old block translation survived as its next sibling.
+    mount(`
+      <div>
+        <p id="p">A re-rendered paragraph with brand new text content to translate.</p>
+        <span data-immersive-translated="1" class="immersive-translate-target">旧的译文残留在这里</span>
+      </div>
+    `);
+    const { units } = scanRoot(document.body, { targetLang: 'ZH', nextUnitIndex: 0 });
+    const unit = units.find(u => u.el.id === 'p');
+    expect(unit).toBeDefined();
+    expect(unit!.html).not.toContain('旧的译文');
+    expect(document.querySelector('[data-immersive-translated]')).toBeNull();
+  });
+
+  it('keeps a target still owned by a marked source', () => {
+    mount(`
+      <div>
+        <p data-immersive-source="1" data-immersive-source-id="u0">Already translated paragraph stays.</p>
+        <span data-immersive-translated="1" class="immersive-translate-target">已有译文</span>
+        <p id="new">A newly added paragraph with enough text for translation.</p>
+      </div>
+    `);
+    const { units } = scanRoot(document.body, { targetLang: 'ZH', nextUnitIndex: 1 });
+    expect(units.some(u => u.el.id === 'new')).toBe(true);
+    // The owned translation (previous sibling is a marked source) survives.
+    expect(document.querySelector('[data-immersive-translated]')).not.toBeNull();
   });
 });
 
