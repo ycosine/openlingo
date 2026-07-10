@@ -28,6 +28,16 @@ const isHiddenStyle = (el: Element): boolean => {
   if (el.getAttribute('aria-hidden') === 'true') return true;
   // Prefer cheap attribute checks; computed style only when connected.
   if (!el.isConnected) return false;
+  // checkVisibility is native and cheaper than materializing a computed style
+  // declaration; it also accounts for hidden ancestors.
+  const check = (el as HTMLElement & { checkVisibility?: (options?: object) => boolean }).checkVisibility;
+  if (typeof check === 'function') {
+    try {
+      return !check.call(el, { visibilityProperty: true, checkVisibilityCSS: true });
+    } catch {
+      // fall through to computed style
+    }
+  }
   try {
     const cs = window.getComputedStyle(el as HTMLElement);
     if (cs.display === 'none' || cs.visibility === 'hidden') return true;
@@ -113,6 +123,51 @@ const hasRecordedAncestor = (el: Element): boolean => {
     cur = cur.parentElement;
   }
   return false;
+};
+
+// ─── Orphaned translation cleanup ───────────────────────────────────────────
+
+/**
+ * A target node is owned while its source is still marked: block targets sit
+ * right after their source, append-inside targets sit inside it. Anything else
+ * is an orphan left behind by a re-render that replaced the source element.
+ */
+const isOrphanTarget = (t: Element): boolean => {
+  if (t.parentElement?.hasAttribute(SOURCE_ATTR)) return false;
+  if (t.previousElementSibling?.hasAttribute(SOURCE_ATTR)) return false;
+  return true;
+};
+
+/**
+ * Remove orphaned targets inside and immediately after a fresh candidate, so a
+ * re-rendered paragraph is neither double-translated nor serialized with the
+ * old translation's text mixed into the new unit.
+ */
+const sweepOrphanTargets = (el: HTMLElement): void => {
+  if (el.querySelector(`[${TARGET_ATTR}]`)) {
+    el.querySelectorAll(`[${TARGET_ATTR}]`).forEach(t => {
+      if (isOrphanTarget(t)) t.remove();
+    });
+  }
+  let next = el.nextElementSibling;
+  while (next && next.hasAttribute(TARGET_ATTR)) {
+    const cur = next;
+    next = next.nextElementSibling;
+    if (isOrphanTarget(cur)) cur.remove();
+  }
+};
+
+/** textContent with our translation nodes excluded. */
+const textExcludingTargets = (el: Element): string => {
+  if (!el.querySelector(`[${TARGET_ATTR}]`)) return el.textContent ?? '';
+  let out = '';
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let n = walker.nextNode();
+  while (n) {
+    if (!n.parentElement?.closest(`[${TARGET_ATTR}]`)) out += n.nodeValue ?? '';
+    n = walker.nextNode();
+  }
+  return out;
 };
 
 // ─── Paragraph-block granularity ────────────────────────────────────────────
@@ -228,7 +283,11 @@ const tryMakeUnit = (el: HTMLElement, opts: ScanOptions, units: PendingUnit[], c
   if (hasSourceOrTargetMark(el)) return false;
   if (!isInlineOnlySubtree(el)) return false;
 
-  const text = el.textContent?.trim() ?? '';
+  // Kill leftovers from a previous render BEFORE serializing, otherwise the old
+  // translation (a whitelisted <span>) gets unwrapped into the new unit's html.
+  sweepOrphanTargets(el);
+
+  const text = textExcludingTargets(el).trim();
   if (!isMeaningfulText(text)) return false;
   if (failsLinkDensityHeuristic(el)) return false;
   if (shouldSkipAsTargetLanguage(text, opts.targetLang)) return false;
@@ -246,6 +305,7 @@ const tryMakeUnit = (el: HTMLElement, opts: ScanOptions, units: PendingUnit[], c
     id,
     el,
     html,
+    sourceText: text,
     placeholder: null,
     status: 'discovered',
     retries: 0,
@@ -325,5 +385,7 @@ export {
   serializeUnitHtml,
   shouldSkipAsTargetLanguage,
   stripDiscardPlaceholders,
+  sweepOrphanTargets,
+  textExcludingTargets,
 };
 export type { ScanResult };

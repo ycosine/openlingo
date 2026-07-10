@@ -110,6 +110,21 @@ const removePlaceholder = (unit: PendingUnit): void => {
   }
 };
 
+/**
+ * Remove every translation node attached to a source: inner children
+ * (append-inside placement) and the following-sibling chain (block placement).
+ * Used when a source's content changed and its translation is stale.
+ */
+const removeAttachedTargets = (sourceEl: HTMLElement): void => {
+  sourceEl.querySelectorAll(`[${TARGET_ATTR}="1"]`).forEach(n => n.remove());
+  let next = sourceEl.nextElementSibling;
+  while (next && next.hasAttribute(TARGET_ATTR)) {
+    const cur = next;
+    next = next.nextElementSibling;
+    cur.remove();
+  }
+};
+
 const clearAllMarks = (): void => {
   document.querySelectorAll(`[${TARGET_ATTR}="1"]`).forEach(n => n.remove());
   document.querySelectorAll(`[${SOURCE_ATTR}="1"]`).forEach(n => {
@@ -123,6 +138,7 @@ export {
   createPlaceholder,
   ensureStyle,
   placeTargetNode,
+  removeAttachedTargets,
   removePlaceholder,
   swapPlaceholderToTranslation,
 };
