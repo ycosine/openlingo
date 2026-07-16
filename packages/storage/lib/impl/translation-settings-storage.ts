@@ -19,6 +19,10 @@ interface VideoSubtitlesSettingsType {
   youtubeTranslate: boolean;
   /** Cleaner sentence-level re-segmentation of YouTube's auto-captions. */
   youtubeBasicSegmentation: boolean;
+  /** Offer live ElevenLabs transcription when YouTube has no caption track. */
+  youtubeAsrFallbackEnabled: boolean;
+  /** ElevenLabs source language, or auto-detect when set to `auto`. */
+  youtubeAsrLanguage: string;
   /** LLM-driven re-segmentation (slower / costlier — opt-in). */
   youtubeAiSegmentation: boolean;
   /** Auto-translate live captions on Teams / Zoom / Meet. */
@@ -47,6 +51,8 @@ const VIDEO_SUBTITLES_DEFAULTS: VideoSubtitlesSettingsType = {
   youtubeAutoEnable: true,
   youtubeTranslate: true,
   youtubeBasicSegmentation: true,
+  youtubeAsrFallbackEnabled: true,
+  youtubeAsrLanguage: 'auto',
   youtubeAiSegmentation: false,
   meetingsAutoEnable: true,
   preferHumanCaptions: true,

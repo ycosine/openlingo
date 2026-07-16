@@ -19,6 +19,8 @@ tsconfig.tsbuildinfo
 # etc
 .DS_Store
 .idea
+.agents/
+skills-lock.json
 **/.turbo
 
 # compiled

@@ -13,7 +13,7 @@
 ## What it does
 
 - **One-click bilingual webpages.** Click the toolbar icon, every paragraph gets a translation line right below it; the original stays untouched.
-- **YouTube bilingual subtitles.** Auto-engages when you turn on YouTube's CC. The translated line floats just below YouTube's own caption, scaled to the player and the font size you choose.
+- **YouTube bilingual subtitles.** Auto-engages when you turn on YouTube's CC. If a video has no caption track, Chrome 116+ can optionally transcribe its audio live with ElevenLabs Scribe using your own API key.
 - **Bring your own translator.** Pick from:
   - **Google (free)** — works out of the box, no key needed.
   - **DeepL** — paste your `:fx` (Free) or Pro key for higher quality.
@@ -34,6 +34,8 @@ When you open a YouTube video with captions enabled, OpenLingo adds a small butt
 
 If CC is off, the menu shows a one-click "Turn on CC" prompt that flips YouTube's own captions on.
 
+When no YouTube caption track is available, open the toolbar popup and click **Start live transcription**. The original transcript appears immediately, with the translation underneath as it arrives. This fallback is currently Chromium-only.
+
 ## Install
 
 1. Grab `dist.zip` from a release (or build it yourself — see below) and unzip.
@@ -52,13 +54,15 @@ Firefox: use `dist-firefox.zip`, then **Load Temporary Add-on** at `about:debugg
    - OpenAI-compatible: paste a base URL (e.g. `https://api.openai.com/v1`), API key, and model name.
 3. Choose your target language (default: Chinese).
 4. (Optional) In **Bilingual video subtitles**, pick a subtitle style and font size — S / M / L / XL on top of YouTube's own scaling.
+5. (Optional) For videos without captions, enable **Live transcription fallback**, add an ElevenLabs API key, and choose automatic or fixed source-language detection.
 
-Keys live in `chrome.storage.local`. They never leave your browser.
+Keys live in `chrome.storage.local`. Translation keys are sent only to their configured translation provider. The ElevenLabs key is exchanged for a short-lived transcription token when the popup detects a captionless YouTube video; audio is only captured and sent after you explicitly click Start.
 
 ## Use it
 
 - **A webpage**: click the toolbar icon → **Translate this page**. Click again to **Restore**.
 - **A YouTube video**: turn on YouTube's CC. OpenLingo's button lights up and bilingual subtitles appear in a few seconds.
+- **A YouTube video without captions**: click the toolbar icon → **Start live transcription**.
 
 ## FAQ
 
@@ -72,7 +76,7 @@ YouTube only emits the caption track URL after CC is enabled in the player. Use 
 You're out of monthly characters. Rotate to another key, switch provider, or wait for the next reset. Cached translations keep displaying.
 
 **Does it phone home?**
-No telemetry. Text is sent only to the translation provider you've configured, and only when you actively trigger translation (click the toolbar button or turn on YouTube CC).
+No telemetry. Text is sent only to the translation provider you've configured. If you explicitly start live transcription, the current tab's audio is streamed to ElevenLabs until you stop it, leave the video, or a native caption track becomes available.
 
 ## Build it yourself
 

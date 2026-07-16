@@ -13,7 +13,9 @@ import type { SubtitleFontScaleType, SubtitleStyleType } from '@extension/storag
 
 const STYLE_TAG_ID = 'openlingo-yt-styles';
 const ROOT_ID = 'openlingo-yt-overlay';
+const ORIGINAL_CLASS = 'openlingo-yt-original';
 const TRANSLATION_CLASS = 'openlingo-yt-translation';
+type OverlayMode = 'native-translation' | 'standalone-bilingual';
 
 const STYLE_FONTS: Record<SubtitleStyleType, string> = {
   serif: 'Georgia, "Times New Roman", serif',
@@ -34,6 +36,8 @@ interface OverlayHandle {
   refresh: () => void;
   /** Update the font-size multiplier without recreating the overlay. */
   setFontScale: (scale: SubtitleFontScaleType) => void;
+  /** Temporary ASR hypothesis. It is replaced by a committed cue. */
+  setPartialText: (text: string) => void;
   /** Tear down the independent overlay root and cancel the rAF loop. */
   destroy: () => void;
 }
@@ -43,6 +47,7 @@ interface CreateOverlayOptions {
   translations: CueTranslationMap;
   subtitleStyle: SubtitleStyleType;
   fontScale: SubtitleFontScaleType;
+  mode?: OverlayMode;
 }
 
 const ensureStyleTag = (preset: SubtitleStyleType): void => {
@@ -74,6 +79,33 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
       letter-spacing: 0;
       white-space: pre-wrap;
+    }
+    #${ROOT_ID} .${ORIGINAL_CLASS} {
+      display: none;
+      padding: 0 0.18em;
+      border-radius: 2px;
+      background: rgba(8, 8, 8, 0.78);
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+      font-family: Arial, Helvetica, sans-serif;
+      font-style: normal;
+      font-weight: 600;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      white-space: pre-wrap;
+    }
+    #${ROOT_ID}[data-mode="standalone-bilingual"] .${ORIGINAL_CLASS} {
+      display: inline;
+    }
+    #${ROOT_ID}[data-mode="standalone-bilingual"] .${TRANSLATION_CLASS} {
+      display: inline;
+    }
+    #${ROOT_ID} .openlingo-yt-line {
+      min-height: 1em;
+      margin-top: 0.2em;
+    }
+    #${ROOT_ID} .openlingo-yt-line:first-child {
+      margin-top: 0;
     }
   `;
   if (existing) {
@@ -130,9 +162,17 @@ const ensureRoot = (): HTMLElement | null => {
   if (!root) {
     root = document.createElement('div');
     root.id = ROOT_ID;
-    const line = document.createElement('span');
-    line.className = TRANSLATION_CLASS;
-    root.appendChild(line);
+    const originalLine = document.createElement('div');
+    originalLine.className = 'openlingo-yt-line';
+    const original = document.createElement('span');
+    original.className = ORIGINAL_CLASS;
+    originalLine.appendChild(original);
+    const translationLine = document.createElement('div');
+    translationLine.className = 'openlingo-yt-line';
+    const translation = document.createElement('span');
+    translation.className = TRANSLATION_CLASS;
+    translationLine.appendChild(translation);
+    root.append(originalLine, translationLine);
     player.appendChild(root);
   }
   return root;
@@ -171,10 +211,27 @@ const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement, fontSca
   root.style.top = `${top}px`;
 };
 
+const syncStandalonePosition = (root: HTMLElement, fontScale: number): void => {
+  const player = findPlayerElement();
+  if (!player) return;
+  const playerRect = player.getBoundingClientRect();
+  const baseFont = Math.min(27, Math.max(15, playerRect.width * 0.021));
+  root.style.fontSize = `${baseFont * fontScale}px`;
+  root.style.lineHeight = '1.35';
+  root.style.fontWeight = '600';
+  root.style.maxWidth = `${playerRect.width * 0.86}px`;
+  root.style.left = '50%';
+  root.style.top = 'auto';
+  root.style.bottom = player.classList.contains('ytp-autohide') ? '5.5%' : '72px';
+  root.style.display = 'block';
+};
+
 const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   let cues = initial.cues;
   let translations = initial.translations;
   let fontScale: number = initial.fontScale;
+  const mode: OverlayMode = initial.mode ?? 'native-translation';
+  let partialText = '';
   let destroyed = false;
   let cueIndexHint = 0;
   let lastRenderedCueId: number | null = -1;
@@ -183,9 +240,15 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
 
   ensureStyleTag(initial.subtitleStyle);
 
-  const writeText = (root: HTMLElement, text: string): void => {
-    const line = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
-    if (line && line.textContent !== text) line.textContent = text;
+  const writeText = (root: HTMLElement, original: string, translation: string): void => {
+    const originalLine = root.querySelector<HTMLElement>(`.${ORIGINAL_CLASS}`);
+    const translationLine = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
+    if (originalLine && originalLine.textContent !== original) originalLine.textContent = original;
+    if (translationLine && translationLine.textContent !== translation) translationLine.textContent = translation;
+    const originalWrap = originalLine?.parentElement;
+    const translationWrap = translationLine?.parentElement;
+    if (originalWrap) originalWrap.style.display = original ? 'block' : 'none';
+    if (translationWrap) translationWrap.style.display = translation ? 'block' : 'none';
   };
 
   const tick = (): void => {
@@ -194,13 +257,17 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
 
     const root = ensureRoot();
     if (!root) return;
+    root.dataset.mode = mode;
 
-    const captionWindow = pickCaptionWindow(findCaptionWindows());
-    if (!captionWindow) {
-      hideRoot(root);
-      lastRenderedCueId = -1;
-      lastRenderedText = '';
-      return;
+    let captionWindow: HTMLElement | null = null;
+    if (mode === 'native-translation') {
+      captionWindow = pickCaptionWindow(findCaptionWindows());
+      if (!captionWindow) {
+        hideRoot(root);
+        lastRenderedCueId = -1;
+        lastRenderedText = '';
+        return;
+      }
     }
 
     const video = findVideoElement();
@@ -208,28 +275,31 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     const { cue, index } = findActiveCue(cues, timeMs, cueIndexHint);
     cueIndexHint = index;
 
-    if (!cue) {
+    if (!cue && !partialText) {
       hideRoot(root);
       lastRenderedCueId = null;
       lastRenderedText = '';
       return;
     }
 
-    const translation = translations.get(cue.id)?.trim() ?? '';
-    if (!translation) {
+    const original = partialText || cue?.text || '';
+    const translation = partialText || !cue ? '' : (translations.get(cue.id)?.trim() ?? '');
+    if (mode === 'native-translation' && !translation) {
       hideRoot(root);
-      lastRenderedCueId = cue.id;
+      lastRenderedCueId = cue?.id ?? null;
       lastRenderedText = '';
       return;
     }
 
-    const stateChanged = cue.id !== lastRenderedCueId || translation !== lastRenderedText;
+    const stateKey = `${original}\n${translation}`;
+    const stateChanged = (cue?.id ?? null) !== lastRenderedCueId || stateKey !== lastRenderedText;
     if (stateChanged) {
-      writeText(root, translation);
-      lastRenderedCueId = cue.id;
-      lastRenderedText = translation;
+      writeText(root, mode === 'standalone-bilingual' ? original : '', translation);
+      lastRenderedCueId = cue?.id ?? null;
+      lastRenderedText = stateKey;
     }
-    syncRootPosition(root, captionWindow, fontScale);
+    if (mode === 'standalone-bilingual') syncStandalonePosition(root, fontScale);
+    else if (captionWindow) syncRootPosition(root, captionWindow, fontScale);
   };
 
   rafId = requestAnimationFrame(tick);
@@ -249,6 +319,11 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     setFontScale: scale => {
       fontScale = scale;
     },
+    setPartialText: text => {
+      partialText = text.trim();
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
+    },
     destroy: () => {
       destroyed = true;
       if (rafId) cancelAnimationFrame(rafId);
@@ -261,5 +336,5 @@ const updateOverlayStyle = (preset: SubtitleStyleType): void => {
   ensureStyleTag(preset);
 };
 
-export type { OverlayHandle, CreateOverlayOptions };
+export type { OverlayHandle, CreateOverlayOptions, OverlayMode };
 export { createOverlay, updateOverlayStyle };

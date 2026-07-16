@@ -20,6 +20,7 @@ describe('createPlayerButton', () => {
         onEnableCaptions: vi.fn(),
         onHideButton: vi.fn(),
         onDownloadSrt: vi.fn(),
+        onOpenPopup: vi.fn(),
       },
       {
         enabled: true,
@@ -28,6 +29,8 @@ describe('createPlayerButton', () => {
         needsCaptions: false,
         captionSource: 'ai',
         canDownloadSrt: false,
+        asrFallback: false,
+        asrRunning: false,
       },
     );
 

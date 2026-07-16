@@ -1,3 +1,4 @@
+import { IS_FIREFOX } from '@extension/env';
 import { readFileSync } from 'node:fs';
 import type { ManifestType } from '@extension/shared';
 
@@ -20,8 +21,11 @@ const manifest = {
     'https://api.deepl.com/*',
     'https://api-free.deepl.com/*',
     'https://*.youtube.com/*',
+    ...(!IS_FIREFOX ? ['https://api.elevenlabs.io/*'] : []),
   ],
-  permissions: ['storage', 'tabs', 'webRequest'],
+  permissions: IS_FIREFOX
+    ? ['storage', 'tabs', 'webRequest']
+    : ['storage', 'tabs', 'webRequest', 'tabCapture', 'offscreen'],
   options_page: 'options/index.html',
   background: {
     service_worker: 'background.js',
