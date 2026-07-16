@@ -7,6 +7,7 @@
  * flicker during playback.
  */
 
+import { joinTranscriptTail } from './live-text.js';
 import type { Cue } from './cues.js';
 import type { CueTranslationMap } from './translate.js';
 import type { SubtitleFontScaleType, SubtitleStyleType } from '@extension/storage';
@@ -40,6 +41,12 @@ interface OverlayHandle {
   setFontScale: (scale: SubtitleFontScaleType) => void;
   /** Temporary ASR hypothesis. It is replaced by a committed cue. */
   setPartialText: (text: string) => void;
+  /**
+   * Provisional translation of the newest utterance. `cueId` is null while the
+   * utterance is still a streaming partial and becomes the committed cue's id
+   * once it lands, so the renderer knows which slot the text belongs to.
+   */
+  setLiveTranslation: (text: string, cueId: number | null) => void;
   /** Tear down the independent overlay root and cancel the rAF loop. */
   destroy: () => void;
 }
@@ -112,16 +119,24 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
     #${ROOT_ID}[data-mode="standalone-bilingual"] .${TRANSLATION_CLASS} {
       display: inline;
     }
+    /* Live text must not re-center on every appended word: readers track a
+       stable left anchor while new words appear at the tail, broadcast-style. */
+    #${ROOT_ID}[data-mode="standalone-bilingual"] {
+      text-align: left;
+    }
+    /* Roll-up window: a fixed two-line viewport over a growing scroller. The
+       scroller is translated up so the newest words are always visible; the
+       max-height is set from the resolved line-height each frame. */
     #${ROOT_ID} .openlingo-yt-line {
-      min-height: 1em;
       margin-top: 0.2em;
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
       overflow: hidden;
     }
     #${ROOT_ID} .openlingo-yt-line:first-child {
       margin-top: 0;
+    }
+    #${ROOT_ID} .openlingo-yt-scroll {
+      transition: transform 180ms ease-out;
+      will-change: transform;
     }
   `;
   if (existing) {
@@ -187,20 +202,48 @@ const ensureRoot = (): HTMLElement | null => {
   if (!root) {
     root = document.createElement('div');
     root.id = ROOT_ID;
-    const originalLine = document.createElement('div');
-    originalLine.className = 'openlingo-yt-line';
-    const original = document.createElement('span');
-    original.className = ORIGINAL_CLASS;
-    originalLine.appendChild(original);
-    const translationLine = document.createElement('div');
-    translationLine.className = 'openlingo-yt-line';
-    const translation = document.createElement('span');
-    translation.className = TRANSLATION_CLASS;
-    translationLine.appendChild(translation);
-    root.append(originalLine, translationLine);
+    const buildLine = (spanClass: string): HTMLElement => {
+      const line = document.createElement('div');
+      line.className = 'openlingo-yt-line';
+      const scroller = document.createElement('div');
+      scroller.className = 'openlingo-yt-scroll';
+      const span = document.createElement('span');
+      span.className = spanClass;
+      scroller.appendChild(span);
+      line.appendChild(scroller);
+      return line;
+    };
+    root.append(buildLine(ORIGINAL_CLASS), buildLine(TRANSLATION_CLASS));
     player.appendChild(root);
   }
   return root;
+};
+
+/** Lines the roll-up viewport shows before older text scrolls out. */
+const MAX_VISIBLE_LINES = 2;
+
+/** Pin the viewport to MAX_VISIBLE_LINES and translate the scroller so the
+ *  freshest words sit at the bottom edge. Rolling up (content grew) animates;
+ *  a shrink means the text was replaced, so it snaps instead of sliding down. */
+const syncRollingWindow = (line: HTMLElement, lineHeightPx: number): void => {
+  const scroller = line.firstElementChild as HTMLElement | null;
+  if (!scroller) return;
+  const maxHeight = `${Math.ceil(lineHeightPx * MAX_VISIBLE_LINES) + 1}px`;
+  if (line.style.maxHeight !== maxHeight) line.style.maxHeight = maxHeight;
+  const overflow = Math.max(0, scroller.scrollHeight - line.clientHeight);
+  const previous = Number(scroller.dataset.rollOffset ?? '0');
+  if (Math.abs(overflow - previous) < 1) return;
+  scroller.style.transition = overflow > previous ? '' : 'none';
+  scroller.style.transform = overflow > 0 ? `translateY(-${overflow}px)` : '';
+  scroller.dataset.rollOffset = String(overflow);
+};
+
+const syncRollingWindows = (root: HTMLElement): void => {
+  const lineHeightPx = parseFloat(window.getComputedStyle(root).lineHeight);
+  if (!Number.isFinite(lineHeightPx) || lineHeightPx <= 0) return;
+  root.querySelectorAll<HTMLElement>('.openlingo-yt-line').forEach(line => {
+    if (line.style.display !== 'none') syncRollingWindow(line, lineHeightPx);
+  });
 };
 
 const hideRoot = (root: HTMLElement | null): void => {
@@ -220,6 +263,7 @@ const syncRootPosition = (root: HTMLElement, captionWindow: HTMLElement, fontSca
   root.style.fontSize = `${segmentFontPx * fontScale}px`;
   root.style.lineHeight = segmentStyle.lineHeight;
   root.style.fontWeight = segmentStyle.fontWeight;
+  root.style.width = '';
   root.style.maxWidth = `${Math.min(Math.max(captionRect.width * 1.35, 360), playerRect.width * 0.86)}px`;
   root.style.display = 'block';
 
@@ -241,14 +285,29 @@ const syncStandalonePosition = (root: HTMLElement, fontScale: number): void => {
   if (!player) return;
   const playerRect = player.getBoundingClientRect();
   const baseFont = Math.min(24, Math.max(14, playerRect.width * 0.019));
-  root.style.fontSize = `${baseFont * fontScale}px`;
+  const fontPx = baseFont * fontScale;
+  root.style.fontSize = `${fontPx}px`;
   root.style.lineHeight = '1.35';
   root.style.fontWeight = '600';
-  root.style.maxWidth = `${playerRect.width * 0.86}px`;
+  // Fixed width (not max-width): live text left-aligns inside a stable block
+  // so already-rendered words never rewrap when new ones stream in.
+  root.style.width = `${Math.min(playerRect.width * 0.86, fontPx * 30)}px`;
+  root.style.maxWidth = '';
   root.style.left = '50%';
   root.style.top = 'auto';
   root.style.bottom = player.classList.contains('ytp-autohide') ? '5.5%' : '72px';
   root.style.display = 'block';
+};
+
+/** Bound on the transcript-tail strings handed to layout each frame. The
+ *  rolling window only ever shows the last two lines of this. */
+const STREAM_TAIL_CHARS = 320;
+/** Ignore an earlier utterance as reading context once it ended this long ago. */
+const CONTEXT_WINDOW_MS = 6000;
+
+const cueBefore = (cues: Cue[], target: Cue): Cue | null => {
+  const index = cues.indexOf(target);
+  return index > 0 ? cues[index - 1] : null;
 };
 
 const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
@@ -257,6 +316,8 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   let fontScale: number = initial.fontScale;
   const mode: OverlayMode = initial.mode ?? 'native-translation';
   let partialText = '';
+  let liveTranslation = '';
+  let liveTranslationCueId: number | null = null;
   let destroyed = false;
   let cueIndexHint = 0;
   let lastRenderedCueId: number | null = -1;
@@ -266,14 +327,23 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
   ensureStyleTag(initial.subtitleStyle);
 
   const writeText = (root: HTMLElement, original: string, translation: string): void => {
-    const originalLine = root.querySelector<HTMLElement>(`.${ORIGINAL_CLASS}`);
-    const translationLine = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
-    if (originalLine && originalLine.textContent !== original) originalLine.textContent = original;
-    if (translationLine && translationLine.textContent !== translation) translationLine.textContent = translation;
-    const originalWrap = originalLine?.parentElement;
-    const translationWrap = translationLine?.parentElement;
+    const originalSpan = root.querySelector<HTMLElement>(`.${ORIGINAL_CLASS}`);
+    const translationSpan = root.querySelector<HTMLElement>(`.${TRANSLATION_CLASS}`);
+    if (originalSpan && originalSpan.textContent !== original) originalSpan.textContent = original;
+    if (translationSpan && translationSpan.textContent !== translation) translationSpan.textContent = translation;
+    const originalWrap = originalSpan?.closest<HTMLElement>('.openlingo-yt-line');
+    const translationWrap = translationSpan?.closest<HTMLElement>('.openlingo-yt-line');
     if (originalWrap) originalWrap.style.display = original ? '' : 'none';
     if (translationWrap) translationWrap.style.display = translation ? '' : 'none';
+  };
+
+  /** Translation slot for a committed cue: prefer the streamed/final result,
+   *  but keep the longer provisional until the real one catches up so the
+   *  line never restarts from empty right after a commit. */
+  const translationForCue = (cueId: number): string => {
+    const committed = translations.get(cueId)?.trim() ?? '';
+    const provisional = liveTranslationCueId === cueId ? liveTranslation : '';
+    return committed.length >= provisional.length ? committed : provisional;
   };
 
   const tick = (): void => {
@@ -307,29 +377,48 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
       return;
     }
 
-    const original = partialText || cue?.text || '';
-    // In bilingual mode the translation lags one sentence: while a new partial
-    // streams, keep showing the latest committed cue's translation instead of
-    // blanking the line (translations arrive after the cue was committed).
-    const translationSource =
-      mode === 'standalone-bilingual' ? (cue ?? findLatestStartedCue(cues, timeMs)) : partialText ? null : cue;
-    const translation = translationSource ? (translations.get(translationSource.id)?.trim() ?? '') : '';
-    if (mode === 'native-translation' && !translation) {
-      hideRoot(root);
-      lastRenderedCueId = cue?.id ?? null;
-      lastRenderedText = '';
-      return;
+    let original = '';
+    let translation = '';
+    if (mode === 'standalone-bilingual') {
+      // Two utterance slots rendered as one continuous stream: the previous
+      // utterance stays as reading context while the current one (a streaming
+      // partial, or the just-committed cue) grows at the tail. The roll-up
+      // window shows the last two lines of the joined text.
+      const current = partialText ? null : cue;
+      const previous = partialText ? findLatestStartedCue(cues, timeMs) : current ? cueBefore(cues, current) : null;
+      const previousRecent = !!previous && timeMs - previous.endMs < CONTEXT_WINDOW_MS;
+      const currentText = partialText || current?.text || '';
+      original = joinTranscriptTail(previousRecent ? previous.text : '', currentText, STREAM_TAIL_CHARS);
+
+      const currentTranslation = partialText
+        ? liveTranslationCueId === null
+          ? liveTranslation
+          : ''
+        : current
+          ? translationForCue(current.id)
+          : '';
+      const previousTranslation = previousRecent ? translationForCue(previous.id) : '';
+      translation = joinTranscriptTail(previousTranslation, currentTranslation, STREAM_TAIL_CHARS);
+    } else {
+      translation = partialText || !cue ? '' : (translations.get(cue.id)?.trim() ?? '');
+      if (!translation) {
+        hideRoot(root);
+        lastRenderedCueId = cue?.id ?? null;
+        lastRenderedText = '';
+        return;
+      }
     }
 
     const stateKey = `${original}\n${translation}`;
     const stateChanged = (cue?.id ?? null) !== lastRenderedCueId || stateKey !== lastRenderedText;
     if (stateChanged) {
-      writeText(root, mode === 'standalone-bilingual' ? original : '', translation);
+      writeText(root, original, translation);
       lastRenderedCueId = cue?.id ?? null;
       lastRenderedText = stateKey;
     }
     if (mode === 'standalone-bilingual') syncStandalonePosition(root, fontScale);
     else if (captionWindow) syncRootPosition(root, captionWindow, fontScale);
+    syncRollingWindows(root);
   };
 
   rafId = requestAnimationFrame(tick);
@@ -351,6 +440,12 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     },
     setPartialText: text => {
       partialText = text.trim();
+      lastRenderedCueId = -1;
+      lastRenderedText = '';
+    },
+    setLiveTranslation: (text, cueId) => {
+      liveTranslation = text.trim();
+      liveTranslationCueId = cueId;
       lastRenderedCueId = -1;
       lastRenderedText = '';
     },
