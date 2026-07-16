@@ -4,7 +4,12 @@ body {
   padding: 0;
   background: #fbf7ee;
   color: #15201f;
-  font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family:
+    'Geist',
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -32,7 +37,7 @@ samp {
 @keyframes ol-popin {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(-4px);
+    transform: translateY(-3px);
   }
   to {
     opacity: 1;

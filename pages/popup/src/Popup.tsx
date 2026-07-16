@@ -27,8 +27,7 @@ interface LangSpec {
 
 const LANGS: Record<string, LangSpec> = {
   ZH: { native: '中文', code: 'ZH', english: 'Chinese' },
-  'EN-US': { native: 'English', code: 'EN', english: 'English (US)' },
-  'EN-GB': { native: 'English', code: 'EN', english: 'English (UK)' },
+  'EN-US': { native: 'English', code: 'EN', english: 'English' },
   JA: { native: '日本語', code: 'JA', english: 'Japanese' },
   KO: { native: '한국어', code: 'KO', english: 'Korean' },
   FR: { native: 'Français', code: 'FR', english: 'French' },
@@ -263,14 +262,12 @@ const linkBtn = (color: string): CSSProperties => ({
   fontSize: 'inherit',
 });
 
-const labelEyebrow = (color: string): CSSProperties => ({
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
+const fieldLabel = (color: string): CSSProperties => ({
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: 0,
   color,
   marginBottom: 6,
-  fontFamily: '"Geist Mono", ui-monospace, monospace',
 });
 
 const langChip = (accent: string, ink: string, open: boolean): CSSProperties => ({
@@ -304,7 +301,6 @@ const primaryBtn = (accent: string, disabled = false): CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: disabled ? 'none' : `0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 14px ${accent}33`,
   overflow: 'hidden',
   fontFamily: 'inherit',
 });
@@ -339,14 +335,13 @@ const LanguageMenu = ({ active, onPick }: { active: string; onPick: (code: strin
       background: '#FFFFFF',
       border: '0.5px solid rgba(15,79,74,0.14)',
       borderRadius: 12,
-      boxShadow: '0 12px 28px rgba(15,79,74,0.18), 0 2px 6px rgba(15,79,74,0.08)',
       padding: 6,
       maxHeight: 240,
       overflowY: 'auto',
       animation: 'ol-popin 0.14s ease both',
     }}>
     {Object.entries(LANGS).map(([key, l]) => {
-      const isActive = key === active;
+      const isActive = key === (active === 'EN-GB' ? 'EN-US' : active);
       return (
         <button
           key={key}
@@ -418,7 +413,6 @@ const ProviderMenu = ({ active, onPick }: { active: ProviderId; onPick: (id: Pro
       background: '#FFFFFF',
       border: '0.5px solid rgba(15,79,74,0.14)',
       borderRadius: 12,
-      boxShadow: '0 12px 28px rgba(15,79,74,0.18), 0 2px 6px rgba(15,79,74,0.08)',
       padding: 6,
       animation: 'ol-popin 0.14s ease both',
       fontFamily: '"Geist", system-ui, sans-serif',
@@ -426,12 +420,10 @@ const ProviderMenu = ({ active, onPick }: { active: ProviderId; onPick: (id: Pro
     <div
       style={{
         padding: '6px 10px 4px',
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
+        fontSize: 11,
+        fontWeight: 500,
+        letterSpacing: 0,
         color: INK_FAINT,
-        fontFamily: '"Geist Mono", ui-monospace, monospace',
       }}>
       Provider
     </div>
@@ -573,12 +565,12 @@ const BodyHasKey = ({
   const translating = state === 'translating';
   const translated = state === 'translated';
   const error = state === 'error';
-  const targ = LANGS[targetLang] ?? LANGS.ZH;
+  const targ = LANGS[targetLang === 'EN-GB' ? 'EN-US' : targetLang] ?? LANGS.ZH;
 
   return (
     <>
       <div style={{ marginTop: 4, position: 'relative' }}>
-        <div style={labelEyebrow(INK_FAINT)}>Translate to</div>
+        <div style={fieldLabel(INK_FAINT)}>Translate to</div>
         <button
           onClick={() => setOpenMenu(openMenu === 'lang' ? null : 'lang')}
           disabled={translating}
@@ -780,6 +772,13 @@ const Popup = () => {
         : pageStatus === 'translated'
           ? 'translated'
           : 'idle';
+  const providerSummary = !status.isReady
+    ? `${preset.name} · no key`
+    : providerId === 'openai-compatible'
+      ? `${preset.name} · ${status.detail}`
+      : providerId === 'deepl'
+        ? `${preset.name} · ${status.tier}`
+        : preset.name;
 
   return (
     <div
@@ -837,21 +836,14 @@ const Popup = () => {
         style={{
           borderTop: `0.5px solid ${CARD_BORDER}`,
           background: FOOTER_BG,
-          padding: '7px 10px 7px 16px',
+          padding: '7px 10px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           fontSize: 11.5,
           color: INK_SOFT,
           position: 'relative',
         }}>
-        <button
-          onClick={onOpenOptions}
-          style={{ ...linkBtn(INK_SOFT), display: 'flex', alignItems: 'center', gap: 5, padding: '4px 0' }}>
-          <GearIcon size={11} />
-          <span>Options</span>
-        </button>
-
         <button
           onClick={() => setOpenMenu(openMenu === 'provider' ? null : 'provider')}
           style={{
@@ -863,35 +855,23 @@ const Popup = () => {
             borderRadius: 7,
             background: openMenu === 'provider' ? 'rgba(15,79,74,0.06)' : 'transparent',
             transition: 'background 0.12s',
+            minWidth: 0,
+            maxWidth: 230,
           }}>
-          {status.isReady ? (
-            <span style={{ color: ACCENT, display: 'flex', alignItems: 'center' }}>
-              <ProviderGlyph id={providerId} color={ACCENT} size={12} />
-            </span>
-          ) : (
-            <span style={{ width: 5, height: 5, borderRadius: 99, background: '#C58B3A' }} />
-          )}
+          {!status.isReady && <span style={{ width: 5, height: 5, borderRadius: 99, background: '#C58B3A' }} />}
           <span
             style={{
-              fontFamily: '"Geist Mono", ui-monospace, monospace',
-              fontSize: 10.5,
-              letterSpacing: '0.04em',
+              fontSize: 11.5,
               color: INK,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}>
-            {preset.name}
-            <span style={{ color: INK_FAINT }}>
-              {status.isReady ? (
-                <>
-                  {' '}
-                  · {status.tier}
-                  {status.detail ? ` · ${status.detail}` : ''}
-                </>
-              ) : (
-                ' · no key'
-              )}
-            </span>
+            {providerSummary}
           </span>
-          <ChevronIcon size={10} color={INK_FAINT} />
+          <span style={{ display: 'flex', flexShrink: 0 }}>
+            <ChevronIcon size={10} color={INK_FAINT} />
+          </span>
         </button>
 
         {openMenu === 'provider' && <ProviderMenu active={providerId} onPick={onPickProvider} />}

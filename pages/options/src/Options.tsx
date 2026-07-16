@@ -36,7 +36,7 @@ const MODEL_PRESETS: ModelPreset[] = [
     name: 'DeepSeek-V4-Flash',
     tier: 'Pro',
     baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
   },
   {
     id: 'qwen-3.5-plus',
@@ -258,7 +258,6 @@ const optBtn = (accent: string, primary: boolean, disabled = false): CSSProperti
         background: accent,
         color: '#fff',
         border: 0,
-        boxShadow: disabled ? 'none' : `0 1px 0 rgba(255,255,255,0.18) inset, 0 4px 10px ${accent}33`,
       }
     : {
         ...base,
@@ -285,7 +284,6 @@ const Card = ({ title, children }: { title: string; children: ReactNode }) => (
       background: '#FFFFFF',
       borderRadius: 14,
       border: `0.5px solid ${CARD_BORDER}`,
-      boxShadow: '0 1px 0 rgba(255,255,255,0.6) inset, 0 4px 14px rgba(15,79,74,0.06)',
       padding: '20px 22px',
       marginBottom: 18,
     }}>
@@ -719,9 +717,7 @@ const Options = () => {
           position: 'sticky',
           top: 0,
           zIndex: 5,
-          background: 'rgba(244,239,227,0.86)',
-          backdropFilter: 'blur(18px) saturate(140%)',
-          WebkitBackdropFilter: 'blur(18px) saturate(140%)',
+          background: PAGE_BG,
           borderBottom: `0.5px solid ${CARD_BORDER}`,
           padding: '14px 32px',
           display: 'flex',
@@ -1113,10 +1109,10 @@ const Options = () => {
                     marginTop: -4,
                     padding: '9px 11px',
                     borderRadius: 9,
-                    background: '#E8F2EA',
-                    border: '0.5px solid rgba(44,122,92,0.25)',
+                    background: '#FBF9F2',
+                    border: `0.5px solid ${CARD_BORDER}`,
                     fontSize: 12.5,
-                    color: '#1F5A41',
+                    color: INK_SOFT,
                     display: 'flex',
                     gap: 9,
                     alignItems: 'flex-start',
@@ -1126,18 +1122,16 @@ const Options = () => {
                       display: 'inline-flex',
                       width: 15,
                       height: 15,
-                      borderRadius: 99,
-                      background: '#2C7A5C',
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexShrink: 0,
                       marginTop: 1,
                     }}>
-                    <CheckIcon size={9} color="#fff" />
+                    <CheckIcon size={12} color={ACCENT} />
                   </span>
                   <div style={{ flex: 1 }}>
-                    <strong style={{ fontWeight: 600 }}>No API key required.</strong> Uses the public{' '}
-                    <code style={mono('#1F5A41')}>translate.googleapis.com</code> endpoint — unofficial, Google may
+                    <strong style={{ fontWeight: 600, color: INK }}>No API key required.</strong> Uses the public{' '}
+                    <code style={mono(ACCENT)}>translate.googleapis.com</code> endpoint — unofficial, Google may
                     rate-limit heavy use.
                   </div>
                 </div>

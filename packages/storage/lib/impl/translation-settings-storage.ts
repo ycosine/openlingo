@@ -7,7 +7,7 @@ type DisplayStyleType = 'block' | 'replace';
 
 type SubtitleStyleType = 'serif' | 'sans' | 'mono';
 
-type SubtitleFontScaleType = 0.85 | 1 | 1.25 | 1.5;
+type SubtitleFontScaleType = 0.65 | 0.75 | 0.85 | 1;
 
 interface VideoSubtitlesSettingsType {
   /** Master switch — turn the feature on for every supported site. */
@@ -63,22 +63,34 @@ const DEFAULTS: TranslationSettingsType = {
   videoSubtitles: VIDEO_SUBTITLES_DEFAULTS,
 };
 
-const hasFullVideoSubtitles = (v: VideoSubtitlesSettingsType | undefined): v is VideoSubtitlesSettingsType =>
-  !!v &&
-  typeof v === 'object' &&
-  'enabled' in v &&
-  'youtubeAutoEnable' in v &&
-  'youtubeTranslate' in v &&
-  'subtitleStyle' in v;
+const SUBTITLE_FONT_SCALES: readonly SubtitleFontScaleType[] = [0.65, 0.75, 0.85, 1];
+
+const normalizeSubtitleFontScale = (value: unknown): SubtitleFontScaleType =>
+  SUBTITLE_FONT_SCALES.includes(value as SubtitleFontScaleType) ? (value as SubtitleFontScaleType) : 1;
+
+let lastNormalizedSource: TranslationSettingsType | null | undefined;
+let lastNormalizedValue: TranslationSettingsType = DEFAULTS;
 
 const normalize = (value: TranslationSettingsType | null | undefined): TranslationSettingsType => {
   if (!value) return DEFAULTS;
-  if (hasFullVideoSubtitles(value.videoSubtitles)) return value;
+  if (value === lastNormalizedSource) return lastNormalizedValue;
+
   const partial: Partial<VideoSubtitlesSettingsType> =
     value.videoSubtitles && typeof value.videoSubtitles === 'object'
       ? (value.videoSubtitles as Partial<VideoSubtitlesSettingsType>)
       : {};
-  return { ...value, videoSubtitles: { ...VIDEO_SUBTITLES_DEFAULTS, ...partial } };
+  const normalized: TranslationSettingsType = {
+    ...value,
+    videoSubtitles: {
+      ...VIDEO_SUBTITLES_DEFAULTS,
+      ...partial,
+      subtitleFontScale: normalizeSubtitleFontScale(partial.subtitleFontScale),
+    },
+  };
+
+  lastNormalizedSource = value;
+  lastNormalizedValue = normalized;
+  return normalized;
 };
 
 const baseStorage: BaseStorageType<TranslationSettingsType> = createStorage<TranslationSettingsType>(

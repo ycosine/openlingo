@@ -18,8 +18,8 @@ const ensureStyle = (): void => {
   style.id = STYLE_ELEMENT_ID;
   style.textContent = `
 .${TARGET_CLASS} {
-  font-style: italic;
-  font-family: Georgia, "Times New Roman", serif;
+  font-style: normal;
+  font-family: inherit;
   color: #15201F;
   opacity: .9;
 }

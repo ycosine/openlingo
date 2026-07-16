@@ -14,7 +14,6 @@ const cardStyle: CSSProperties = {
   background: '#FFFFFF',
   borderRadius: 14,
   border: `0.5px solid ${CARD_BORDER}`,
-  boxShadow: '0 1px 0 rgba(255,255,255,0.6) inset, 0 4px 14px rgba(15,79,74,0.06)',
   padding: '20px 22px',
   marginBottom: 18,
 };
@@ -91,10 +90,10 @@ const Row = ({
 );
 
 const FONT_SCALE_OPTIONS: Array<{ id: SubtitleFontScaleType; label: string }> = [
-  { id: 0.85, label: 'S' },
-  { id: 1, label: 'M' },
-  { id: 1.25, label: 'L' },
-  { id: 1.5, label: 'XL' },
+  { id: 0.65, label: '65%' },
+  { id: 0.75, label: '75%' },
+  { id: 0.85, label: '85%' },
+  { id: 1, label: '100%' },
 ];
 
 const FontScaleSegmented = ({
@@ -201,20 +200,12 @@ const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontSca
         position: 'relative',
         width: '100%',
         aspectRatio: '16 / 7',
-        background: 'linear-gradient(155deg, #1a2a36 0%, #0e1620 55%, #050a10 100%)',
+        background: '#0E1620',
         borderRadius: 10,
         overflow: 'hidden',
         fontFamily: '"Geist", system-ui, sans-serif',
         color: '#fff',
       }}>
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background:
-            'radial-gradient(60% 40% at 35% 30%, rgba(255,220,160,0.10), transparent 60%), radial-gradient(50% 70% at 80% 80%, rgba(80,140,160,0.20), transparent 70%)',
-        }}
-      />
       <div
         style={{
           position: 'absolute',
@@ -225,11 +216,9 @@ const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontSca
           gap: 6,
           fontSize: 10.5,
           color: 'rgba(255,255,255,0.45)',
-          fontFamily: '"Geist Mono", ui-monospace, monospace',
           letterSpacing: 0,
         }}>
-        <span style={{ width: 6, height: 6, borderRadius: 99, background: '#E25555' }} />
-        LIVE · talk.mp4
+        Subtitle preview
       </div>
       <div
         style={{
@@ -240,9 +229,8 @@ const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontSca
           maxWidth: '86%',
           textAlign: 'center',
           padding: '10px 18px',
-          background: 'rgba(8,12,18,0.55)',
-          backdropFilter: 'blur(4px)',
-          borderRadius: 10,
+          background: 'rgba(8,12,18,0.82)',
+          borderRadius: 7,
         }}>
         <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.35, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
           When you start something new, it&apos;s easy to feel overwhelmed by the size of the problem.
@@ -307,7 +295,6 @@ const VideoSubtitlesTab = () => {
           control={<Toggle value={v.youtubeTranslate} onChange={val => update({ youtubeTranslate: val })} />}
         />
         <Row
-          indent
           title="Basic sentence re-segmentation"
           hint="Stitches YouTube's auto-captions into cleaner sentences before translating."
           control={
@@ -329,7 +316,7 @@ const VideoSubtitlesTab = () => {
         />
         <Row
           title="Subtitle font size"
-          hint="Scales the translated line on top of the platform's own caption size. S = 85% · M = 100% · L = 125% · XL = 150%."
+          hint="Relative to the platform's original caption size."
           control={
             <FontScaleSegmented value={v.subtitleFontScale} onChange={val => update({ subtitleFontScale: val })} />
           }

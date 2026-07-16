@@ -20,7 +20,7 @@ interface ButtonState {
   status: Status;
   statusText: string;
   errorMessage?: string;
-  /** YouTube CC is off; show the actionable "Turn on captions" callout. */
+  /** YouTube CC is off; show the actionable "Turn on captions" notice. */
   needsCaptions: boolean;
   /** Which kind of captions feed the translation — drives the menu header. */
   captionSource: CaptionSource;
@@ -64,27 +64,57 @@ const ensureStyleTag = (): void => {
       flex-shrink: 0;
       font: inherit;
     }
-    #${BUTTON_ID}:hover .openlingo-yt-button-bubble {
-      transform: scale(1.04);
-    }
     .openlingo-yt-button-bubble {
       position: relative;
       width: 36px;
       height: 36px;
       border-radius: 9px;
       background: ${ACCENT};
-      box-shadow: 0 4px 14px ${ACCENT}66, 0 0 0 2px rgba(255,255,255,0.10);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.35);
       display: inline-flex;
       align-items: center;
       justify-content: center;
       padding: 1px 6px;
       box-sizing: border-box;
-      transition: transform 0.12s ease;
     }
-    .openlingo-yt-button-bubble svg {
+    .openlingo-yt-button-mark {
+      position: relative;
       display: block;
-      width: 20px;
-      height: 20px;
+      width: 22px;
+      height: 18px;
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+    .openlingo-yt-button-mark-back,
+    .openlingo-yt-button-mark-front {
+      position: absolute;
+      display: block;
+      box-sizing: border-box;
+      border-radius: 3px;
+    }
+    .openlingo-yt-button-mark-back {
+      top: 0;
+      left: 0;
+      width: 14px;
+      height: 10px;
+      background: rgba(255,255,255,0.38);
+    }
+    .openlingo-yt-button-mark-front {
+      right: 0;
+      bottom: 0;
+      width: 16px;
+      height: 11px;
+      background: #fff;
+    }
+    .openlingo-yt-button-mark-front::after {
+      content: "";
+      position: absolute;
+      left: 3px;
+      bottom: -3px;
+      width: 0;
+      height: 0;
+      border-top: 4px solid #fff;
+      border-right: 4px solid transparent;
     }
     .openlingo-yt-button-dot {
       position: absolute;
@@ -95,11 +125,9 @@ const ensureStyleTag = (): void => {
       border-radius: 99px;
       background: #3FA678;
       border: 1.5px solid rgba(0,0,0,0.75);
-      box-shadow: 0 0 6px rgba(63,166,120,0.6);
     }
     .openlingo-yt-button-dot[data-status="translating"] {
       background: #E2B23F;
-      animation: openlingo-pulse 1.2s ease-in-out infinite;
     }
     .openlingo-yt-button-dot[data-status="error"] {
       background: #C24A4A;
@@ -113,11 +141,6 @@ const ensureStyleTag = (): void => {
     .openlingo-yt-button-dot[data-needs-captions="1"] {
       display: block;
       background: #E2B23F;
-      animation: openlingo-pulse 1.4s ease-in-out infinite;
-    }
-    @keyframes openlingo-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.45; }
     }
 
     #${MENU_ID} {
@@ -126,11 +149,10 @@ const ensureStyleTag = (): void => {
       bottom: 44px;
       width: 240px;
       box-sizing: border-box;
-      background: rgba(20,26,34,0.95);
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
-      border-radius: 12px;
-      box-shadow: 0 14px 40px rgba(0,0,0,0.4);
+      background: #171B20;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.32);
       padding: 6px;
       color: #fff;
       font-family: "Geist", -apple-system, system-ui, sans-serif;
@@ -139,7 +161,7 @@ const ensureStyleTag = (): void => {
       animation: openlingo-popin 0.14s ease both;
     }
     @keyframes openlingo-popin {
-      from { opacity: 0; transform: scale(0.96) translateY(4px); }
+      from { opacity: 0; transform: translateY(3px); }
       to { opacity: 1; transform: none; }
     }
     .openlingo-yt-menu-header {
@@ -150,7 +172,7 @@ const ensureStyleTag = (): void => {
       font-size: 11px;
       color: rgba(255,255,255,0.55);
       font-family: "Geist", -apple-system, system-ui, sans-serif;
-      letter-spacing: 0.66px;
+      letter-spacing: 0;
     }
     .openlingo-yt-menu-item {
       width: 100%;
@@ -211,41 +233,39 @@ const ensureStyleTag = (): void => {
       font-size: 10.5px;
       color: #E89B9B;
       line-height: 1.4;
-      font-family: "Geist Mono", ui-monospace, monospace;
-      letter-spacing: 0;
     }
-    .openlingo-yt-menu-callout {
+    .openlingo-yt-menu-caption-notice {
       margin: 4px 6px 6px;
       padding: 10px 11px 11px;
-      background: linear-gradient(180deg, rgba(226,178,63,0.18), rgba(226,178,63,0.10));
-      border: 0.5px solid rgba(226,178,63,0.45);
-      border-radius: 8px;
+      background: #20252B;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 6px;
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
-    .openlingo-yt-menu-callout-title {
+    .openlingo-yt-menu-caption-notice-title {
       font-size: 12px;
-      font-weight: 500;
-      color: #FFD984;
+      font-weight: 600;
+      color: #FFFFFF;
       line-height: 1.35;
       display: flex;
       align-items: flex-start;
       gap: 8px;
     }
-    .openlingo-yt-menu-callout-title svg {
+    .openlingo-yt-menu-caption-notice-title svg {
       flex-shrink: 0;
       margin-top: 1px;
     }
-    .openlingo-yt-menu-callout-body {
+    .openlingo-yt-menu-caption-notice-body {
       font-size: 11px;
       line-height: 1.45;
       color: rgba(255,255,255,0.78);
     }
-    .openlingo-yt-menu-callout-cta {
+    .openlingo-yt-menu-caption-notice-cta {
       align-self: stretch;
       border: 0;
-      border-radius: 6px;
+      border-radius: 5px;
       background: #E2B23F;
       color: #2A1F00;
       font: inherit;
@@ -255,7 +275,7 @@ const ensureStyleTag = (): void => {
       cursor: pointer;
       transition: filter 0.12s ease;
     }
-    .openlingo-yt-menu-callout-cta:hover {
+    .openlingo-yt-menu-caption-notice-cta:hover {
       filter: brightness(1.06);
     }
   `;
@@ -272,15 +292,21 @@ const speechMarkSvg = (size: number, opacity: number = 1): string => `
     <path d="M10.6 19 L9 22.7 L13.8 19.3 Z" fill="#fff" fill-opacity="${opacity}" />
   </svg>`;
 
+const buttonMarkHtml = (): string => `
+  <span class="openlingo-yt-button-mark" aria-hidden="true">
+    <span class="openlingo-yt-button-mark-back"></span>
+    <span class="openlingo-yt-button-mark-front"></span>
+  </span>`;
+
 const headerLabelFor = (state: ButtonState): string => {
-  if (!state.enabled) return 'OPENLINGO PAUSED';
-  if (state.status === 'error') return 'TRANSLATION ERROR';
-  if (state.status === 'no-cues') return 'NO CAPTIONS AVAILABLE';
-  if (state.needsCaptions) return 'CAPTIONS OFF';
-  if (state.captionSource === 'ai') return 'USING AI CAPTIONS';
-  if (state.captionSource === 'human') return 'USING HUMAN CAPTIONS';
-  if (state.status === 'translating') return 'TRANSLATING…';
-  return 'WAITING FOR CAPTIONS';
+  if (!state.enabled) return 'OpenLingo paused';
+  if (state.status === 'error') return 'Translation error';
+  if (state.status === 'no-cues') return 'No captions available';
+  if (state.needsCaptions) return 'Captions are off';
+  if (state.captionSource === 'ai') return 'Using auto-generated captions';
+  if (state.captionSource === 'human') return 'Using creator captions';
+  if (state.status === 'translating') return 'Translating…';
+  return 'Waiting for captions';
 };
 
 const captionAlertSvg = (size: number): string => `
@@ -299,6 +325,16 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
   let menuOpen = false;
   let removeOutsideClick: (() => void) | null = null;
 
+  const menuStateKey = (value: ButtonState): string =>
+    [
+      value.enabled,
+      value.status,
+      value.errorMessage ?? '',
+      value.needsCaptions,
+      value.captionSource ?? '',
+      value.canDownloadSrt,
+    ].join('|');
+
   const buildButtonElement = (): HTMLButtonElement => {
     const btn = document.createElement('button');
     btn.id = BUTTON_ID;
@@ -307,7 +343,7 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
     btn.title = 'OpenLingo';
     btn.innerHTML = `
       <span class="openlingo-yt-button-bubble">
-        ${speechMarkSvg(20)}
+        ${buttonMarkHtml()}
         <span class="openlingo-yt-button-dot" data-status="${state.status}" data-needs-captions="0"></span>
       </span>
     `;
@@ -364,15 +400,15 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
       }
       ${
         showCallout
-          ? `<div class="openlingo-yt-menu-callout">
-              <div class="openlingo-yt-menu-callout-title">
+          ? `<div class="openlingo-yt-menu-caption-notice">
+              <div class="openlingo-yt-menu-caption-notice-title">
                 ${captionAlertSvg(14)}
                 <span>Turn on YouTube captions to start translating</span>
               </div>
-              <div class="openlingo-yt-menu-callout-body">
+              <div class="openlingo-yt-menu-caption-notice-body">
                 OpenLingo translates the captions YouTube provides, so the player's CC button needs to be on for this video.
               </div>
-              <button type="button" class="openlingo-yt-menu-callout-cta" data-action="enable-captions">Turn on CC</button>
+              <button type="button" class="openlingo-yt-menu-caption-notice-cta" data-action="enable-captions">Turn on CC</button>
             </div>`
           : ''
       }
@@ -410,7 +446,6 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
       }
       if (action === 'toggle') {
         callbacks.onToggleEnabled(!state.enabled);
-        paintMenu();
         return;
       }
       if (action === 'hide') {
@@ -467,9 +502,10 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
 
   return {
     setState: patch => {
+      const previousMenuState = menuStateKey(state);
       state = { ...state, ...patch };
       paintButton();
-      if (menuOpen) paintMenu();
+      if (menuOpen && previousMenuState !== menuStateKey(state)) paintMenu();
     },
     destroy: () => {
       destroyed = true;

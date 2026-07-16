@@ -34,6 +34,11 @@ interface TranslateSession {
   onUpdate: (listener: () => void) => () => void;
 }
 
+interface StartCueTranslationOptions {
+  /** Put the currently playing cue and future cues at the front of the provider queue. */
+  priorityTimeMs?: number;
+}
+
 const newSessionId = (): string => `yt-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 const YOUTUBE_SUBTITLE_MAX_CONCURRENCY = 2;
 
@@ -42,7 +47,15 @@ const escapeForCache = (s: string): string =>
   s.replace(PLAIN_TO_HTML_PLACEHOLDER, ch => (ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : '&amp;'));
 const unescapeFromCache = (s: string): string => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
-const startCueTranslation = (cues: Cue[]): TranslateSession => {
+const orderCuesForTranslation = (cues: Cue[], priorityTimeMs = 0): Cue[] => {
+  if (cues.length < 2 || priorityTimeMs <= 0) return cues;
+  const priorityIndex = cues.findIndex(cue => cue.endMs + 100 >= priorityTimeMs);
+  if (priorityIndex < 0) return [...cues.slice(-1), ...cues.slice(0, -1)];
+  if (priorityIndex === 0) return cues;
+  return [...cues.slice(priorityIndex), ...cues.slice(0, priorityIndex)];
+};
+
+const startCueTranslation = (cues: Cue[], options: StartCueTranslationOptions = {}): TranslateSession => {
   const sessionId = newSessionId();
   const translations: CueTranslationMap = new Map();
   const listeners = new Set<() => void>();
@@ -83,7 +96,10 @@ const startCueTranslation = (cues: Cue[]): TranslateSession => {
   // Fire one big batch. The background translator chunks it down to fit each
   // provider's per-request limits; subtitles ask for a gentler cap because a
   // full video can otherwise create an avoidable provider-side rate spike.
-  const units = cues.map(c => ({ id: String(c.id), html: escapeForCache(c.text) }));
+  // Start near the current playback position so single-text providers do not
+  // spend minutes translating old cues before the viewer sees the first line.
+  const queuedCues = orderCuesForTranslation(cues, options.priorityTimeMs);
+  const units = queuedCues.map(c => ({ id: String(c.id), html: escapeForCache(c.text) }));
   chrome.runtime
     .sendMessage({ type: 'TR_TRANSLATE_BATCH', sessionId, units, maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY })
     .catch(err => {
@@ -111,5 +127,5 @@ const startCueTranslation = (cues: Cue[]): TranslateSession => {
   };
 };
 
-export type { CueTranslationMap, TranslateSession };
-export { startCueTranslation };
+export type { CueTranslationMap, StartCueTranslationOptions, TranslateSession };
+export { orderCuesForTranslation, startCueTranslation };

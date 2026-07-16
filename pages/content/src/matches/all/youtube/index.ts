@@ -157,6 +157,11 @@ const statusForActive = (): Status => {
   return 'translating';
 };
 
+const currentPlaybackTimeMs = (): number => {
+  const video = document.querySelector<HTMLVideoElement>('.html5-main-video, video.video-stream');
+  return video && Number.isFinite(video.currentTime) ? Math.max(0, video.currentTime * 1000) : 0;
+};
+
 const beginTranslation = async (url: string): Promise<void> => {
   if (!lastSettings) return;
   if (!featureOn(lastSettings) || !perVideoEnabled) return;
@@ -206,7 +211,7 @@ const beginTranslation = async (url: string): Promise<void> => {
     return;
   }
 
-  const translateSession = startCueTranslation(cues);
+  const translateSession = startCueTranslation(cues, { priorityTimeMs: currentPlaybackTimeMs() });
   const overlay = createOverlay({
     cues,
     translations: translateSession.translations,
