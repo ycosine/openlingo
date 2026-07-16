@@ -11,15 +11,30 @@ import {
 } from './constants.js';
 import { stripDiscardPlaceholders } from './scanner.js';
 import type { PendingUnit } from './types.js';
+import type { PageTranslationFontType } from '@extension/storage';
 
-const ensureStyle = (): void => {
-  if (document.getElementById(STYLE_ELEMENT_ID)) return;
-  const style = document.createElement('style');
-  style.id = STYLE_ELEMENT_ID;
-  style.textContent = `
+const DEFAULT_PAGE_TRANSLATION_FONT: PageTranslationFontType = 'lxgw-wenkai-lite';
+
+const PAGE_FONT_FAMILIES: Record<PageTranslationFontType, string> = {
+  'lxgw-wenkai-lite': '"OpenLingo LXGW WenKai Lite", "Kaiti SC", KaiTi, serif',
+  page: 'inherit',
+  sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif',
+  serif: 'Georgia, "Times New Roman", "Songti SC", SimSun, serif',
+};
+
+const fontAssetUrl = (): string => chrome.runtime.getURL('options/fonts/LXGWWenKaiLite-Regular.ttf');
+
+const styleText = (pageFont: PageTranslationFontType): string => `
+@font-face {
+  font-family: "OpenLingo LXGW WenKai Lite";
+  src: url("${fontAssetUrl()}") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
 .${TARGET_CLASS} {
   font-style: normal;
-  font-family: inherit;
+  font-family: ${PAGE_FONT_FAMILIES[pageFont]};
   color: #15201F;
   opacity: .9;
 }
@@ -54,7 +69,18 @@ const ensureStyle = (): void => {
   40% { transform: translateY(-2px); opacity: 1; }
 }
 `;
+
+const ensureStyle = (pageFont: PageTranslationFontType = DEFAULT_PAGE_TRANSLATION_FONT): void => {
+  if (document.getElementById(STYLE_ELEMENT_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ELEMENT_ID;
+  style.textContent = styleText(pageFont);
   document.head.appendChild(style);
+};
+
+const updateTranslationFont = (pageFont: PageTranslationFontType): void => {
+  const style = document.getElementById(STYLE_ELEMENT_ID);
+  if (style) style.textContent = styleText(pageFont);
 };
 
 const isBlockLikeDisplay = (el: HTMLElement): boolean => {
@@ -141,4 +167,5 @@ export {
   removeAttachedTargets,
   removePlaceholder,
   swapPlaceholderToTranslation,
+  updateTranslationFont,
 };
