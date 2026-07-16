@@ -5,6 +5,8 @@ import type { ProviderCredential, TranslationProvider } from '@extension/transla
 interface TranslateUnit {
   id: string;
   html: string;
+  /** One-shot text (e.g. a live ASR partial): bypass the translation cache. */
+  transient?: boolean;
 }
 
 interface TranslateBatchRequest {
@@ -259,12 +261,13 @@ class TranslateSession {
     if (this.closed || this.controller.signal.aborted) return;
 
     const { provider, sourceLang, targetLang } = ctx;
-    const cacheKeys = batch.map(u => cacheKey(provider.id, sourceLang, targetLang, u.html));
-    const cached = await translationCacheStorage.getMany(cacheKeys);
+    const cacheable = batch.filter(u => !u.transient);
+    const cacheKeys = cacheable.map(u => cacheKey(provider.id, sourceLang, targetLang, u.html));
+    const cached = cacheKeys.length > 0 ? await translationCacheStorage.getMany(cacheKeys) : {};
 
     const cachedHits: Array<{ id: string; html: string }> = [];
-    const misses: TranslateUnit[] = [];
-    batch.forEach((u, i) => {
+    const misses: TranslateUnit[] = batch.filter(u => u.transient);
+    cacheable.forEach((u, i) => {
       const hit = cached[cacheKeys[i]];
       if (typeof hit === 'string') cachedHits.push({ id: u.id, html: hit });
       else misses.push(u);
@@ -343,9 +346,10 @@ class TranslateSession {
         const results = units.map((u, i) => ({ id: u.id, html: restored[i] ?? '' }));
         const toCache: Record<string, string> = {};
         units.forEach((u, i) => {
+          if (u.transient) return;
           toCache[cacheKey(provider.id, sourceLang, targetLang, u.html)] = restored[i] ?? '';
         });
-        void translationCacheStorage.putMany(toCache);
+        if (Object.keys(toCache).length > 0) void translationCacheStorage.putMany(toCache);
 
         this.sink({
           type: 'TR_TRANSLATE_RESULT',

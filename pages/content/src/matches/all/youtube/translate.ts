@@ -41,10 +41,17 @@ interface TranslateSession {
   onUpdate: (listener: () => void) => () => void;
 }
 
+interface AppendOptions {
+  /** Throwaway units (live partial hypotheses): skip the translation cache. */
+  transient?: boolean;
+}
+
 interface IncrementalTranslateSession {
   sessionId: string;
   translations: CueTranslationMap;
-  append: (cues: Cue[]) => void;
+  append: (cues: Cue[], options?: AppendOptions) => void;
+  /** Whether a unit received its final (non-streaming) translation. */
+  isFinal: (id: number) => boolean;
   cancel: () => void;
   onUpdate: (listener: () => void) => () => void;
   onError: (listener: (error: string) => void) => () => void;
@@ -205,7 +212,7 @@ const startIncrementalCueTranslation = (): IncrementalTranslateSession => {
   return {
     sessionId,
     translations,
-    append: cues => {
+    append: (cues, options) => {
       if (cancelled) return;
       const fresh = cues.filter(cue => {
         if (queuedIds.has(cue.id)) return false;
@@ -216,11 +223,16 @@ const startIncrementalCueTranslation = (): IncrementalTranslateSession => {
       port.postMessage({
         type: 'TR_TRANSLATE_BATCH',
         sessionId,
-        units: fresh.map(cue => ({ id: String(cue.id), html: escapeForCache(cue.text) })),
+        units: fresh.map(cue => ({
+          id: String(cue.id),
+          html: escapeForCache(cue.text),
+          ...(options?.transient ? { transient: true } : {}),
+        })),
         maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY,
         wantPartials: true,
       });
     },
+    isFinal: id => finalIds.has(id),
     cancel: () => {
       if (cancelled) return;
       cancelled = true;

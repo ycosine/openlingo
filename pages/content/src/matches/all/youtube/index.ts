@@ -15,6 +15,7 @@
 
 import { appendSequentialCue, createAsrCue, replaceOverlappingCues } from './asr-cues.js';
 import { currentVideoId, fetchCues } from './cues.js';
+import { sliceForLiveTranslation } from './live-text.js';
 import { createOverlay, updateOverlayStyle } from './overlay.js';
 import { createPlayerButton } from './player-button.js';
 import { startCueTranslation, startIncrementalCueTranslation } from './translate.js';
@@ -73,6 +74,17 @@ interface ActiveAsrSession {
    *  timeline was re-anchored and overlapping cues must be replaced. */
   lastAsrStreamId: string | null;
   autoReconnects: number;
+  /** Live provisional translation of the newest utterance (see below). */
+  partialGen: number;
+  /** Negative translation-unit id of the last partial slice sent, if any. */
+  lastPartialUnitId: number | null;
+  /** Cue the last partial slice belongs to once committed; null while streaming. */
+  partialUnitCueId: number | null;
+  lastPartialText: string;
+  lastPartialSentText: string;
+  lastPartialSentAt: number;
+  partialTranslateTimer: number;
+  liveTranslation: string;
   detectedLanguage?: string;
   error?: string;
 }
@@ -105,6 +117,14 @@ let videoBindTimer = 0;
 /** Cap consecutive automatic reconnects after recoverable stream drops
  *  (network hiccups, ElevenLabs per-session time limits). */
 const MAX_ASR_AUTO_RECONNECTS = 3;
+
+/** Live provisional translation: ElevenLabs only commits an utterance after a
+ *  VAD silence, so waiting for the commit leaves the translation line a full
+ *  sentence behind the audio. Instead, a bounded slice of the growing partial
+ *  is re-translated on this throttle and shown until the committed cue's real
+ *  translation streams in. */
+const PARTIAL_TRANSLATE_INTERVAL_MS = 1200;
+const PARTIAL_TRANSLATE_MAX_CHARS = 280;
 
 const GLOBAL_KEY = '__openlingoYouTubeSubtitles';
 
@@ -146,9 +166,33 @@ const cancelActive = (): void => {
 
 const cancelActiveAsr = (): void => {
   if (!activeAsr) return;
+  if (activeAsr.partialTranslateTimer) window.clearTimeout(activeAsr.partialTranslateTimer);
   activeAsr.translateSession.cancel();
   activeAsr.overlay.destroy();
   activeAsr = null;
+};
+
+/** Send the freshest partial slice for provisional translation, throttled. */
+const sendPartialTranslation = (session: ActiveAsrSession): void => {
+  const slice = sliceForLiveTranslation(session.lastPartialText, PARTIAL_TRANSLATE_MAX_CHARS);
+  if (slice.length < 2 || slice === session.lastPartialSentText) return;
+  const elapsed = Date.now() - session.lastPartialSentAt;
+  if (elapsed < PARTIAL_TRANSLATE_INTERVAL_MS) {
+    if (session.partialTranslateTimer) return;
+    session.partialTranslateTimer = window.setTimeout(() => {
+      session.partialTranslateTimer = 0;
+      if (activeAsr === session) sendPartialTranslation(session);
+    }, PARTIAL_TRANSLATE_INTERVAL_MS - elapsed);
+    return;
+  }
+  session.partialGen += 1;
+  session.lastPartialUnitId = -session.partialGen;
+  session.partialUnitCueId = null;
+  session.lastPartialSentText = slice;
+  session.lastPartialSentAt = Date.now();
+  session.translateSession.append([{ id: session.lastPartialUnitId, startMs: 0, endMs: 0, text: slice }], {
+    transient: true,
+  });
 };
 
 const featureOn = (settings: VideoSubtitlesSettingsType): boolean =>
@@ -264,10 +308,30 @@ const ensureAsrSession = (videoId: string): ActiveAsrSession | null => {
     nextCueId: 0,
     lastAsrStreamId: null,
     autoReconnects: 0,
+    partialGen: 0,
+    lastPartialUnitId: null,
+    partialUnitCueId: null,
+    lastPartialText: '',
+    lastPartialSentText: '',
+    lastPartialSentAt: 0,
+    partialTranslateTimer: 0,
+    liveTranslation: '',
   };
   activeAsr = session;
   translateSession.onUpdate(() => {
     if (activeAsr !== session) return;
+    if (session.lastPartialUnitId !== null) {
+      if (session.partialUnitCueId !== null && translateSession.isFinal(session.partialUnitCueId)) {
+        // The committed cue's real translation arrived; retire the provisional.
+        session.liveTranslation = '';
+        session.lastPartialUnitId = null;
+        session.partialUnitCueId = null;
+      } else {
+        const provisional = session.translations.get(session.lastPartialUnitId);
+        if (provisional !== undefined) session.liveTranslation = provisional.trim();
+      }
+    }
+    overlay.setLiveTranslation(session.liveTranslation, session.partialUnitCueId);
     overlay.setCues(session.cues, session.translations);
     overlay.refresh();
     setButtonStatus(statusForActive(), {
@@ -301,7 +365,20 @@ const appendAsrCue = (event: AsrCommittedEvent): void => {
   if (!session || activeAsr !== session) return;
   const cue = cueFromAsrEvent(session, event);
   session.overlay.setPartialText('');
+  // The utterance is final; pending partial-translation work is now stale.
+  session.lastPartialText = '';
+  session.lastPartialSentText = '';
+  if (session.partialTranslateTimer) {
+    window.clearTimeout(session.partialTranslateTimer);
+    session.partialTranslateTimer = 0;
+  }
   if (!cue) return;
+  // The provisional translation now stands in for this cue until its real
+  // translation streams in.
+  if (session.lastPartialUnitId !== null) {
+    session.partialUnitCueId = cue.id;
+    session.overlay.setLiveTranslation(session.liveTranslation, session.partialUnitCueId);
+  }
 
   session.cues =
     session.lastAsrStreamId === null || session.lastAsrStreamId === event.sessionId
@@ -516,7 +593,9 @@ const onRuntimeMessage = (
     if (partial.videoId !== currentVideoId()) return;
     const session = ensureAsrSession(partial.videoId);
     if (!session) return;
+    session.lastPartialText = partial.text;
     session.overlay.setPartialText(partial.text);
+    sendPartialTranslation(session);
     setButtonStatus('listening', { statusText: 'Listening with ElevenLabs', errorMessage: '' });
     return;
   }
