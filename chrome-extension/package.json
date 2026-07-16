@@ -1,6 +1,6 @@
 {
   "name": "openlingo-extension",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "OpenLingo — core extension (manifest, background SW)",
   "type": "module",
   "private": true,
