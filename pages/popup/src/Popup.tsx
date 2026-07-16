@@ -709,6 +709,8 @@ const Popup = () => {
   }, []);
 
   useEffect(() => {
+    // Chromium-only: Firefox ships without the tabCapture permission.
+    if (!chrome.tabCapture?.getMediaStreamId) return undefined;
     let cancelled = false;
     let timer = 0;
     void (async () => {
@@ -826,14 +828,18 @@ const Popup = () => {
           else resolve(id);
         });
       });
+      // The popup may have been open for a while; re-read the playback
+      // position at click time so the transcript anchors correctly.
+      const freshContext = await sendToActiveTab<YouTubeAsrContext>({ type: 'YT_ASR_CONTEXT' });
+      const context = freshContext?.ok && freshContext.videoId ? freshContext : youtubeContext;
       const response = (await chrome.runtime.sendMessage({
         type: 'OL_ASR_START',
         tabId: activeTabId,
         streamId,
         context: {
-          videoId: youtubeContext.videoId,
-          videoTimeMs: youtubeContext.videoTimeMs ?? 0,
-          playbackRate: youtubeContext.playbackRate ?? 1,
+          videoId: context.videoId,
+          videoTimeMs: context.videoTimeMs ?? 0,
+          playbackRate: context.playbackRate ?? 1,
         },
       })) as AsrStartResponse;
       if (!response.ok) {

@@ -1,4 +1,4 @@
-import { createAsrCue, replaceOverlappingCues } from './asr-cues.js';
+import { appendSequentialCue, createAsrCue, replaceOverlappingCues } from './asr-cues.js';
 import { describe, expect, it } from 'vitest';
 import type { AsrCommittedEvent } from '@extension/shared';
 
@@ -48,6 +48,36 @@ describe('createAsrCue', () => {
       filterAmbient: false,
     });
     expect(cue?.endMs).toBe(22_800);
+  });
+});
+
+describe('appendSequentialCue', () => {
+  it('keeps earlier cues from the same stream and trims their display-extended end', () => {
+    // Cue 1's real speech ends at 10s but its endMs was extended for display.
+    // The next commit starts at 10.9s — cue 1 must survive with a trimmed end.
+    const result = appendSequentialCue([{ id: 1, startMs: 8_000, endMs: 13_800, text: 'first sentence' }], {
+      id: 2,
+      startMs: 10_900,
+      endMs: 16_600,
+      text: 'second sentence',
+    });
+    expect(result).toEqual([
+      { id: 1, startMs: 8_000, endMs: 10_900, text: 'first sentence' },
+      { id: 2, startMs: 10_900, endMs: 16_600, text: 'second sentence' },
+    ]);
+  });
+
+  it('leaves non-overlapping cues untouched', () => {
+    const result = appendSequentialCue([{ id: 1, startMs: 1_000, endMs: 2_000, text: 'early' }], {
+      id: 2,
+      startMs: 5_000,
+      endMs: 9_000,
+      text: 'later',
+    });
+    expect(result).toEqual([
+      { id: 1, startMs: 1_000, endMs: 2_000, text: 'early' },
+      { id: 2, startMs: 5_000, endMs: 9_000, text: 'later' },
+    ]);
   });
 });
 

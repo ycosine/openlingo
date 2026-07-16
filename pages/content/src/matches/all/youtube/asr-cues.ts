@@ -41,5 +41,16 @@ const replaceOverlappingCues = (cues: Cue[], replacement: Cue): Cue[] =>
     replacement,
   ].sort((a, b) => a.startMs - b.startMs);
 
+/** Append a cue from the same ASR stream. Word timestamps within one stream are
+ *  monotonic, so earlier cues only overlap through their display-extended endMs;
+ *  trim that back instead of dropping the cue and losing its text. */
+const appendSequentialCue = (cues: Cue[], next: Cue): Cue[] =>
+  [
+    ...cues.map(existing =>
+      existing.endMs > next.startMs ? { ...existing, endMs: Math.max(existing.startMs, next.startMs) } : existing,
+    ),
+    next,
+  ].sort((a, b) => a.startMs - b.startMs);
+
 export type { CreateAsrCueOptions };
-export { createAsrCue, replaceOverlappingCues };
+export { appendSequentialCue, createAsrCue, replaceOverlappingCues };

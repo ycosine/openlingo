@@ -37,7 +37,14 @@ interface GetStateMessage {
   tabId: number;
 }
 
-type InboundMessage = StartMessage | StopMessage | PauseMessage | ReanchorMessage | GetStateMessage;
+interface SetContextMessage {
+  target: 'offscreen';
+  type: 'OL_ASR_OFFSCREEN_SET_CONTEXT';
+  tabId: number;
+  context: AsrPlaybackContext;
+}
+
+type InboundMessage = StartMessage | StopMessage | PauseMessage | ReanchorMessage | GetStateMessage | SetContextMessage;
 
 interface ElevenLabsMessage {
   message_type?: string;
@@ -85,7 +92,7 @@ const sendBackground = (message: Record<string, unknown>): void => {
   chrome.runtime.sendMessage({ target: 'background', ...message }).catch(() => undefined);
 };
 
-const updateState = (capture: ActiveCapture, status: string, error?: string): void => {
+const updateState = (capture: ActiveCapture, status: string, error?: string, recoverable?: boolean): void => {
   capture.status = status;
   sendBackground({
     type: 'OL_ASR_OFFSCREEN_STATE',
@@ -93,6 +100,7 @@ const updateState = (capture: ActiveCapture, status: string, error?: string): vo
     videoId: capture.context.videoId,
     status,
     error,
+    recoverable,
   });
 };
 
@@ -159,7 +167,9 @@ const handleSocketMessage = (capture: ActiveCapture, raw: string): void => {
   }
   if (message.message_type && ELEVENLABS_ERROR_TYPES.has(message.message_type)) {
     const error = message.error ?? message.message ?? message.message_type;
-    updateState(capture, 'error', error);
+    // Hitting the per-session time limit only ends this stream; a fresh
+    // token + socket can pick up where it left off.
+    updateState(capture, 'error', error, message.message_type === 'session_time_limit_exceeded');
   }
 };
 
@@ -186,7 +196,7 @@ const connectSocket = (capture: ActiveCapture, token: string, language: string):
   });
   socket.addEventListener('close', () => {
     if (active === capture && capture.socket === socket && !capture.stopping && !capture.paused) {
-      updateState(capture, 'error', 'ElevenLabs connection closed');
+      updateState(capture, 'error', 'ElevenLabs connection closed', true);
     }
   });
 };
@@ -223,7 +233,9 @@ const startCapture = async (message: StartMessage): Promise<void> => {
     video: false,
   });
 
-  const audioContext = new AudioContext({ sampleRate: 16_000 });
+  // Run the graph at the device's native rate so the re-routed playback keeps
+  // full quality; the worklet downsamples its copy to 16 kHz for ElevenLabs.
+  const audioContext = new AudioContext();
   await audioContext.audioWorklet.addModule(chrome.runtime.getURL('offscreen/pcm-worklet.js'));
   await audioContext.resume();
 
@@ -315,6 +327,12 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
     }
     active.context = reanchor.context;
     connectSocket(active, reanchor.token, reanchor.language);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === 'OL_ASR_OFFSCREEN_SET_CONTEXT') {
+    const sync = message as SetContextMessage;
+    if (active?.tabId === sync.tabId) active.context = sync.context;
     sendResponse({ ok: true });
     return false;
   }

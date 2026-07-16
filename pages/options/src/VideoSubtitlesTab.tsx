@@ -10,6 +10,8 @@ const INK_SOFT = 'rgba(21,32,31,0.62)';
 const CARD_BORDER = 'rgba(15,79,74,0.10)';
 
 const SUPPORTED_SITES = ['YouTube'];
+/** Live transcription needs Chromium's tabCapture; Firefox ships without it. */
+const ASR_AVAILABLE = typeof chrome !== 'undefined' && !!chrome.tabCapture;
 const ASR_LANGUAGES = [
   { value: 'auto', label: 'Auto detect' },
   { value: 'en', label: 'English' },
@@ -346,118 +348,126 @@ const VideoSubtitlesTab = () => {
         />
       </Card>
 
-      <Card title="Live transcription fallback">
-        <Row
-          title="Use ElevenLabs when captions are unavailable"
-          hint="Chrome 116+ only. Audio is captured only after you click Start live transcription in the extension popup."
-          control={
-            <Toggle value={v.youtubeAsrFallbackEnabled} onChange={val => update({ youtubeAsrFallbackEnabled: val })} />
-          }
-        />
-        <Row
-          title="Recognition language"
-          hint="Auto detection works for most videos; fixing the language can improve speed and accuracy."
-          control={
-            <select
-              value={v.youtubeAsrLanguage}
-              onChange={event => update({ youtubeAsrLanguage: event.target.value })}
-              style={{
-                minWidth: 128,
-                border: `0.5px solid ${CARD_BORDER}`,
-                borderRadius: 7,
-                padding: '6px 9px',
-                background: '#fff',
-                color: INK,
-                font: 'inherit',
-                fontSize: 11.5,
-              }}>
-              {ASR_LANGUAGES.map(language => (
-                <option key={language.value} value={language.value}>
-                  {language.label}
-                </option>
-              ))}
-            </select>
-          }
-        />
-        <div style={{ padding: '12px 0 2px', borderTop: `0.5px solid rgba(15,79,74,0.07)` }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500, color: INK }}>ElevenLabs API key</div>
-          <div style={{ fontSize: 11, color: 'rgba(21,32,31,0.55)', marginTop: 3, lineHeight: 1.45 }}>
-            Stored locally. OpenLingo exchanges it for a 15-minute single-use Scribe token before audio capture starts.
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <input
-              type="password"
-              value={asrKey}
-              placeholder="sk_…"
-              onChange={event => {
-                setAsrKey(event.target.value);
-                setAsrDirty(true);
-                setAsrResult(null);
-              }}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: `0.5px solid ${CARD_BORDER}`,
-                borderRadius: 8,
-                padding: '8px 10px',
-                background: '#fff',
-                color: INK,
-                fontFamily: '"Geist Mono", ui-monospace, monospace',
-                fontSize: 11.5,
-              }}
-            />
-            <button
-              type="button"
-              disabled={!asrKey.trim() || asrValidating}
-              onClick={validateAsrKey}
-              style={{
-                border: `0.5px solid ${CARD_BORDER}`,
-                borderRadius: 8,
-                padding: '7px 12px',
-                background: '#fff',
-                color: ACCENT,
-                cursor: !asrKey.trim() || asrValidating ? 'default' : 'pointer',
-                opacity: !asrKey.trim() || asrValidating ? 0.45 : 1,
-                font: 'inherit',
-                fontSize: 11.5,
-                fontWeight: 600,
-              }}>
-              {asrValidating ? 'Testing…' : 'Test'}
-            </button>
-            <button
-              type="button"
-              disabled={!asrDirty}
-              onClick={() => void saveAsrKey()}
-              style={{
-                border: 0,
-                borderRadius: 8,
-                padding: '7px 12px',
-                background: ACCENT,
-                color: '#fff',
-                cursor: asrDirty ? 'pointer' : 'default',
-                opacity: asrDirty ? 1 : 0.45,
-                font: 'inherit',
-                fontSize: 11.5,
-                fontWeight: 600,
-              }}>
-              Save
-            </button>
-          </div>
-          {asrResult && (
-            <div
-              style={{
-                marginTop: 9,
-                padding: '8px 10px',
-                borderRadius: 8,
-                background: asrResult.ok ? '#E8F2EA' : '#FBEAEA',
-                color: asrResult.ok ? '#1F5A41' : '#7A2828',
-                fontSize: 11.5,
-              }}>
-              {asrResult.ok ? 'Key works. ElevenLabs Scribe is ready.' : asrResult.message || 'Key validation failed.'}
+      {ASR_AVAILABLE && (
+        <Card title="Live transcription fallback">
+          <Row
+            title="Use ElevenLabs when captions are unavailable"
+            hint="Chrome 116+ only. Audio is captured only after you click Start live transcription in the extension popup."
+            control={
+              <Toggle
+                value={v.youtubeAsrFallbackEnabled}
+                onChange={val => update({ youtubeAsrFallbackEnabled: val })}
+              />
+            }
+          />
+          <Row
+            title="Recognition language"
+            hint="Auto detection works for most videos; fixing the language can improve speed and accuracy."
+            control={
+              <select
+                value={v.youtubeAsrLanguage}
+                onChange={event => update({ youtubeAsrLanguage: event.target.value })}
+                style={{
+                  minWidth: 128,
+                  border: `0.5px solid ${CARD_BORDER}`,
+                  borderRadius: 7,
+                  padding: '6px 9px',
+                  background: '#fff',
+                  color: INK,
+                  font: 'inherit',
+                  fontSize: 11.5,
+                }}>
+                {ASR_LANGUAGES.map(language => (
+                  <option key={language.value} value={language.value}>
+                    {language.label}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+          <div style={{ padding: '12px 0 2px', borderTop: `0.5px solid rgba(15,79,74,0.07)` }}>
+            <div style={{ fontSize: 12.5, fontWeight: 500, color: INK }}>ElevenLabs API key</div>
+            <div style={{ fontSize: 11, color: 'rgba(21,32,31,0.55)', marginTop: 3, lineHeight: 1.45 }}>
+              Stored locally. OpenLingo exchanges it for a 15-minute single-use Scribe token before audio capture
+              starts.
             </div>
-          )}
-        </div>
-      </Card>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <input
+                type="password"
+                value={asrKey}
+                placeholder="sk_…"
+                onChange={event => {
+                  setAsrKey(event.target.value);
+                  setAsrDirty(true);
+                  setAsrResult(null);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: `0.5px solid ${CARD_BORDER}`,
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  background: '#fff',
+                  color: INK,
+                  fontFamily: '"Geist Mono", ui-monospace, monospace',
+                  fontSize: 11.5,
+                }}
+              />
+              <button
+                type="button"
+                disabled={!asrKey.trim() || asrValidating}
+                onClick={validateAsrKey}
+                style={{
+                  border: `0.5px solid ${CARD_BORDER}`,
+                  borderRadius: 8,
+                  padding: '7px 12px',
+                  background: '#fff',
+                  color: ACCENT,
+                  cursor: !asrKey.trim() || asrValidating ? 'default' : 'pointer',
+                  opacity: !asrKey.trim() || asrValidating ? 0.45 : 1,
+                  font: 'inherit',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                }}>
+                {asrValidating ? 'Testing…' : 'Test'}
+              </button>
+              <button
+                type="button"
+                disabled={!asrDirty}
+                onClick={() => void saveAsrKey()}
+                style={{
+                  border: 0,
+                  borderRadius: 8,
+                  padding: '7px 12px',
+                  background: ACCENT,
+                  color: '#fff',
+                  cursor: asrDirty ? 'pointer' : 'default',
+                  opacity: asrDirty ? 1 : 0.45,
+                  font: 'inherit',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                }}>
+                Save
+              </button>
+            </div>
+            {asrResult && (
+              <div
+                style={{
+                  marginTop: 9,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: asrResult.ok ? '#E8F2EA' : '#FBEAEA',
+                  color: asrResult.ok ? '#1F5A41' : '#7A2828',
+                  fontSize: 11.5,
+                }}>
+                {asrResult.ok
+                  ? 'Key works. ElevenLabs Scribe is ready.'
+                  : asrResult.message || 'Key validation failed.'}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card title="Caption preferences">
         <Row

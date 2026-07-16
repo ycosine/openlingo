@@ -13,7 +13,7 @@
  * the two flows don't collide.
  */
 
-import { createAsrCue, replaceOverlappingCues } from './asr-cues.js';
+import { appendSequentialCue, createAsrCue, replaceOverlappingCues } from './asr-cues.js';
 import { currentVideoId, fetchCues } from './cues.js';
 import { createOverlay, updateOverlayStyle } from './overlay.js';
 import { createPlayerButton } from './player-button.js';
@@ -69,6 +69,10 @@ interface ActiveAsrSession {
   translateSession: IncrementalTranslateSession;
   overlay: OverlayHandle;
   nextCueId: number;
+  /** ElevenLabs stream id of the last committed event; a change means the
+   *  timeline was re-anchored and overlapping cues must be replaced. */
+  lastAsrStreamId: string | null;
+  autoReconnects: number;
   detectedLanguage?: string;
   error?: string;
 }
@@ -97,6 +101,10 @@ let perVideoHidden = false;
 let boundVideo: HTMLVideoElement | null = null;
 let reanchorTimer = 0;
 let videoBindTimer = 0;
+
+/** Cap consecutive automatic reconnects after recoverable stream drops
+ *  (network hiccups, ElevenLabs per-session time limits). */
+const MAX_ASR_AUTO_RECONNECTS = 3;
 
 const GLOBAL_KEY = '__openlingoYouTubeSubtitles';
 
@@ -254,6 +262,8 @@ const ensureAsrSession = (videoId: string): ActiveAsrSession | null => {
     translateSession,
     overlay,
     nextCueId: 0,
+    lastAsrStreamId: null,
+    autoReconnects: 0,
   };
   activeAsr = session;
   translateSession.onUpdate(() => {
@@ -293,7 +303,11 @@ const appendAsrCue = (event: AsrCommittedEvent): void => {
   session.overlay.setPartialText('');
   if (!cue) return;
 
-  session.cues = replaceOverlappingCues(session.cues, cue);
+  session.cues =
+    session.lastAsrStreamId === null || session.lastAsrStreamId === event.sessionId
+      ? appendSequentialCue(session.cues, cue)
+      : replaceOverlappingCues(session.cues, cue);
+  session.lastAsrStreamId = event.sessionId;
   session.detectedLanguage = event.languageCode ?? session.detectedLanguage;
   session.overlay.setCues(session.cues, session.translations);
   session.overlay.refresh();
@@ -473,16 +487,27 @@ const onRuntimeMessage = (
     if (!session) return;
     session.status = state.status;
     session.error = state.error;
+    if (state.status === 'listening') session.autoReconnects = 0;
+    const willAutoReconnect =
+      state.status === 'error' &&
+      !!state.recoverable &&
+      session.autoReconnects < MAX_ASR_AUTO_RECONNECTS &&
+      !!boundVideo &&
+      !boundVideo.paused;
+    if (willAutoReconnect) {
+      session.autoReconnects += 1;
+      scheduleAsrReanchor(900);
+    }
     setButtonStatus(statusForActive(), {
       statusText:
         state.status === 'paused'
           ? 'Live transcription paused'
-          : state.status === 'reconnecting'
+          : state.status === 'reconnecting' || willAutoReconnect
             ? 'Reconnecting live transcription…'
             : state.status === 'capturing'
               ? 'Starting audio capture…'
               : 'Listening with ElevenLabs',
-      errorMessage: state.error ?? '',
+      errorMessage: willAutoReconnect ? '' : (state.error ?? ''),
     });
     return;
   }

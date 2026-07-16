@@ -6,6 +6,7 @@ import type {
   AsrSessionState,
   AsrStartResponse,
   AsrWord,
+  YouTubeAsrContext,
 } from '@extension/shared';
 
 interface PreparedToken {
@@ -56,6 +57,7 @@ interface OffscreenStateMessage {
   videoId: string;
   status: AsrSessionState['status'];
   error?: string;
+  recoverable?: boolean;
 }
 
 interface OffscreenPartialMessage {
@@ -186,9 +188,33 @@ const stop = async (tabId: number): Promise<void> => {
     await chrome.runtime
       .sendMessage({ target: 'offscreen', type: 'OL_ASR_OFFSCREEN_STOP', tabId })
       .catch(() => undefined);
+    // Nothing left to capture; don't keep the offscreen document alive.
+    if (activeTabId === null) await chrome.offscreen.closeDocument().catch(() => undefined);
   }
   const current = states.get(tabId);
   if (current) publishState({ ...current, status: 'idle', error: undefined });
+};
+
+/** The audio stream's time origin is the moment ElevenLabs reports
+ *  session_started, not when the start/reanchor request was issued. Re-read
+ *  the playback position from the tab so word timestamps map accurately. */
+const syncAnchor = async (tabId: number): Promise<void> => {
+  const context = (await chrome.tabs.sendMessage(tabId, { type: 'YT_ASR_CONTEXT' }).catch(() => undefined)) as
+    | YouTubeAsrContext
+    | undefined;
+  if (!context?.ok || !context.videoId) return;
+  await chrome.runtime
+    .sendMessage({
+      target: 'offscreen',
+      type: 'OL_ASR_OFFSCREEN_SET_CONTEXT',
+      tabId,
+      context: {
+        videoId: context.videoId,
+        videoTimeMs: context.videoTimeMs ?? 0,
+        playbackRate: context.playbackRate ?? 1,
+      },
+    })
+    .catch(() => undefined);
 };
 
 const start = async (message: StartMessage): Promise<AsrStartResponse> => {
@@ -196,8 +222,9 @@ const start = async (message: StartMessage): Promise<AsrStartResponse> => {
   if (!tokenIsFresh(prepared)) {
     return { ok: false, message: 'Transcription preparation expired. Reopen the popup and try again.' };
   }
-  await ensureOffscreen();
+  // Stop any other tab first — stop() may close the offscreen document.
   if (activeTabId !== null && activeTabId !== message.tabId) await stop(activeTabId);
+  await ensureOffscreen();
 
   await removePreparedToken(message.tabId);
   activeTabId = message.tabId;
@@ -207,15 +234,17 @@ const start = async (message: StartMessage): Promise<AsrStartResponse> => {
     videoId: message.context.videoId,
     status: 'capturing',
   });
-  const response = (await chrome.runtime.sendMessage({
-    target: 'offscreen',
-    type: 'OL_ASR_OFFSCREEN_START',
-    tabId: message.tabId,
-    streamId: message.streamId,
-    token: prepared.token,
-    language: settings.videoSubtitles.youtubeAsrLanguage,
-    context: message.context,
-  })) as AsrStartResponse | undefined;
+  const response = (await chrome.runtime
+    .sendMessage({
+      target: 'offscreen',
+      type: 'OL_ASR_OFFSCREEN_START',
+      tabId: message.tabId,
+      streamId: message.streamId,
+      token: prepared.token,
+      language: settings.videoSubtitles.youtubeAsrLanguage,
+      context: message.context,
+    })
+    .catch(() => undefined)) as AsrStartResponse | undefined;
   if (!response?.ok) {
     activeTabId = null;
     publishState({
@@ -297,8 +326,10 @@ export const registerAsrMessageHandlers = (): void => {
           videoId: message.videoId,
           status: message.status,
           error: message.error,
+          recoverable: message.recoverable,
         });
         if (message.status === 'idle' && activeTabId === message.tabId) activeTabId = null;
+        if (message.status === 'listening') void syncAnchor(message.tabId);
       } else if (message.type === 'OL_ASR_OFFSCREEN_PARTIAL') {
         forwardPartial(message);
       } else if (message.type === 'OL_ASR_OFFSCREEN_COMMITTED') {

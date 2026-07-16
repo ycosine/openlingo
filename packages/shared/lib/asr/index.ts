@@ -18,6 +18,8 @@ export interface AsrSessionState {
   videoId: string;
   status: AsrSessionStatus;
   error?: string;
+  /** The error ended the stream but capture is intact; a re-anchor can resume. */
+  recoverable?: boolean;
   detectedLanguage?: string;
 }
 

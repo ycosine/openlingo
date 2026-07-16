@@ -56,7 +56,7 @@ Firefox: use `dist-firefox.zip`, then **Load Temporary Add-on** at `about:debugg
 4. (Optional) In **Bilingual video subtitles**, pick a subtitle style and font size — S / M / L / XL on top of YouTube's own scaling.
 5. (Optional) For videos without captions, enable **Live transcription fallback**, add an ElevenLabs API key, and choose automatic or fixed source-language detection.
 
-Keys live in `chrome.storage.local`. Translation keys are sent only to their configured translation provider. The ElevenLabs key is exchanged for a short-lived transcription token when live transcription starts.
+Keys live in `chrome.storage.local`. Translation keys are sent only to their configured translation provider. The ElevenLabs key is exchanged for a short-lived transcription token when the popup detects a captionless YouTube video; audio is only captured and sent after you explicitly click Start.
 
 ## Use it
 
