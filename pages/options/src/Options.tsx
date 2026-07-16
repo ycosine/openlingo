@@ -5,6 +5,7 @@ import { DEFAULT_SYSTEM_PROMPT_TEMPLATE, getProviderPreset, PROVIDER_PRESETS } f
 import { ErrorDisplay, LoadingSpinner } from '@extension/ui';
 import VideoSubtitlesTab from '@src/VideoSubtitlesTab';
 import { useEffect, useMemo, useState } from 'react';
+import type { PageTranslationFontType } from '@extension/storage';
 import type { ProviderCredential, ProviderId } from '@extension/translation';
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -78,6 +79,41 @@ const LANGS: Record<string, LangSpec> = {
   PT: { native: 'Português', english: 'Portuguese' },
   RU: { native: 'Русский', english: 'Russian' },
 };
+
+const PAGE_FONT_OPTIONS: Array<{
+  id: PageTranslationFontType;
+  label: string;
+  detail: string;
+  fontFamily: string;
+}> = [
+  {
+    id: 'lxgw-wenkai-lite',
+    label: 'LXGW WenKai Lite',
+    detail: 'Default · 中文文楷',
+    fontFamily: '"OpenLingo LXGW WenKai Lite", "Kaiti SC", KaiTi, serif',
+  },
+  {
+    id: 'page',
+    label: 'Match webpage',
+    detail: 'Uses the surrounding text',
+    fontFamily: 'inherit',
+  },
+  {
+    id: 'sans',
+    label: 'System sans',
+    detail: 'Clean and compact',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif',
+  },
+  {
+    id: 'serif',
+    label: 'System serif',
+    detail: 'Book-like reading',
+    fontFamily: 'Georgia, "Times New Roman", "Songti SC", SimSun, serif',
+  },
+];
+
+const pageFontFamily = (font: PageTranslationFontType): string =>
+  PAGE_FONT_OPTIONS.find(option => option.id === font)?.fontFamily ?? PAGE_FONT_OPTIONS[0].fontFamily;
 
 // ─── Icons ──────────────────────────────────────────────────────────────────
 
@@ -596,6 +632,125 @@ const LangSelect = ({
   </div>
 );
 
+const WebpageTranslationPreview = ({ font }: { font: PageTranslationFontType }) => (
+  <div
+    style={{
+      overflow: 'hidden',
+      border: `0.5px solid ${CARD_BORDER}`,
+      borderRadius: 11,
+      background: '#FCFAF5',
+    }}>
+    <div
+      style={{
+        padding: '9px 12px',
+        borderBottom: `0.5px solid ${CARD_BORDER}`,
+        fontSize: 10.5,
+        color: INK_FAINT,
+        fontFamily: '"Geist Mono", ui-monospace, monospace',
+      }}>
+      Webpage preview
+    </div>
+    <div
+      style={{
+        maxWidth: 510,
+        padding: '18px 22px 20px',
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        color: '#27302F',
+      }}>
+      <div style={{ fontSize: 17, lineHeight: 1.35, fontWeight: 600 }}>
+        Small changes become visible when you keep going.
+      </div>
+      <div
+        style={{
+          marginTop: 5,
+          fontFamily: pageFontFamily(font),
+          fontSize: 15.5,
+          lineHeight: 1.65,
+          color: INK,
+          opacity: 0.9,
+        }}>
+        只要持续前行，微小的改变终会清晰可见。
+      </div>
+      <div style={{ marginTop: 12, fontSize: 12.5, lineHeight: 1.6, color: 'rgba(39,48,47,0.72)' }}>
+        A translation appears directly below each paragraph without replacing the original text.
+      </div>
+      <div
+        style={{
+          marginTop: 3,
+          fontFamily: pageFontFamily(font),
+          fontSize: 13,
+          lineHeight: 1.7,
+          color: INK,
+          opacity: 0.9,
+        }}>
+        译文会直接显示在每段原文下方，同时保留网页原有内容。
+      </div>
+    </div>
+  </div>
+);
+
+const PageFontPicker = ({
+  value,
+  onChange,
+}: {
+  value: PageTranslationFontType;
+  onChange: (font: PageTranslationFontType) => void;
+}) => (
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+    {PAGE_FONT_OPTIONS.map(option => {
+      const active = option.id === value;
+      return (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={active}
+          onClick={() => onChange(option.id)}
+          style={{
+            minHeight: 58,
+            padding: '9px 11px',
+            textAlign: 'left',
+            borderRadius: 9,
+            border: `1px solid ${active ? `${ACCENT}88` : CARD_BORDER}`,
+            outline: active ? `2px solid ${ACCENT}18` : 'none',
+            outlineOffset: -1,
+            background: active ? `${ACCENT}0D` : '#FBF9F2',
+            color: INK,
+            cursor: 'pointer',
+          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <span
+              style={{
+                width: 36,
+                flexShrink: 0,
+                fontFamily: option.fontFamily,
+                fontSize: 17,
+                lineHeight: 1,
+                color: active ? ACCENT : INK_SOFT,
+              }}>
+              译 Aa
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600 }}>
+                {option.label}
+              </span>
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 2,
+                  fontFamily: 'inherit',
+                  fontSize: 10.5,
+                  color: INK_FAINT,
+                }}>
+                {option.detail}
+              </span>
+            </span>
+          </div>
+        </button>
+      );
+    })}
+  </div>
+);
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const Options = () => {
@@ -637,6 +792,9 @@ const Options = () => {
   const onTargetChange = (v: string) => translationSettingsStorage.set(prev => ({ ...prev, targetLang: v }));
 
   const onSourceChange = (v: string) => translationSettingsStorage.set(prev => ({ ...prev, sourceLang: v }));
+
+  const onPageFontChange = (font: PageTranslationFontType) =>
+    translationSettingsStorage.set(prev => ({ ...prev, pageTranslationFont: font }));
 
   const save = async () => {
     const trimmed: ProviderCredential = {
@@ -1139,6 +1297,12 @@ const Options = () => {
             </Card>
 
             <Card title="Translation">
+              <WebpageTranslationPreview font={settings.pageTranslationFont} />
+              <Field
+                label="Translation font"
+                hint="Applied only to translated text inserted into webpages. LXGW WenKai Lite is bundled with OpenLingo, so it works offline.">
+                <PageFontPicker value={settings.pageTranslationFont} onChange={onPageFontChange} />
+              </Field>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Field label="Target language" hint="Where translations land.">
                   <LangSelect value={settings.targetLang} onChange={onTargetChange} />

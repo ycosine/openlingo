@@ -5,6 +5,8 @@ type ProviderIdType = 'google-free' | 'deepl' | 'openai-compatible';
 
 type DisplayStyleType = 'block' | 'replace';
 
+type PageTranslationFontType = 'lxgw-wenkai-lite' | 'page' | 'sans' | 'serif';
+
 type SubtitleStyleType = 'serif' | 'sans' | 'mono';
 
 type SubtitleFontScaleType = 0.65 | 0.75 | 0.85 | 1;
@@ -43,8 +45,14 @@ interface TranslationSettingsType {
   targetLang: string;
   sourceLang: string;
   displayStyle: DisplayStyleType;
+  /** Font used for translations injected into webpages. */
+  pageTranslationFont: PageTranslationFontType;
   videoSubtitles: VideoSubtitlesSettingsType;
 }
+
+const PAGE_TRANSLATION_FONTS: readonly PageTranslationFontType[] = ['lxgw-wenkai-lite', 'page', 'sans', 'serif'];
+
+const DEFAULT_PAGE_TRANSLATION_FONT: PageTranslationFontType = 'lxgw-wenkai-lite';
 
 const VIDEO_SUBTITLES_DEFAULTS: VideoSubtitlesSettingsType = {
   enabled: true,
@@ -66,6 +74,7 @@ const DEFAULTS: TranslationSettingsType = {
   targetLang: 'ZH',
   sourceLang: 'auto',
   displayStyle: 'block',
+  pageTranslationFont: DEFAULT_PAGE_TRANSLATION_FONT,
   videoSubtitles: VIDEO_SUBTITLES_DEFAULTS,
 };
 
@@ -73,6 +82,11 @@ const SUBTITLE_FONT_SCALES: readonly SubtitleFontScaleType[] = [0.65, 0.75, 0.85
 
 const normalizeSubtitleFontScale = (value: unknown): SubtitleFontScaleType =>
   SUBTITLE_FONT_SCALES.includes(value as SubtitleFontScaleType) ? (value as SubtitleFontScaleType) : 1;
+
+const normalizePageTranslationFont = (value: unknown): PageTranslationFontType =>
+  PAGE_TRANSLATION_FONTS.includes(value as PageTranslationFontType)
+    ? (value as PageTranslationFontType)
+    : DEFAULT_PAGE_TRANSLATION_FONT;
 
 let lastNormalizedSource: TranslationSettingsType | null | undefined;
 let lastNormalizedValue: TranslationSettingsType = DEFAULTS;
@@ -87,6 +101,7 @@ const normalize = (value: TranslationSettingsType | null | undefined): Translati
       : {};
   const normalized: TranslationSettingsType = {
     ...value,
+    pageTranslationFont: normalizePageTranslationFont(value.pageTranslationFont),
     videoSubtitles: {
       ...VIDEO_SUBTITLES_DEFAULTS,
       ...partial,
@@ -125,9 +140,10 @@ const translationSettingsStorage: BaseStorageType<TranslationSettingsType> = {
 
 export type {
   ProviderIdType,
+  PageTranslationFontType,
   SubtitleStyleType,
   SubtitleFontScaleType,
   VideoSubtitlesSettingsType,
   TranslationSettingsType,
 };
-export { translationSettingsStorage, VIDEO_SUBTITLES_DEFAULTS };
+export { DEFAULT_PAGE_TRANSLATION_FONT, translationSettingsStorage, VIDEO_SUBTITLES_DEFAULTS };

@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'OpenLingo LXGW WenKai Lite';
+  src: url('/options/fonts/LXGWWenKaiLite-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 html,
 body,
 #app-container {
@@ -10,7 +18,12 @@ html,
 body {
   background: #f0eee9;
   color: #15201f;
-  font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family:
+    'Geist',
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }

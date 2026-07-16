@@ -1,15 +1,18 @@
 import { MUTATION_DEBOUNCE_MS, SOURCE_ATTR, SOURCE_ID_ATTR, TARGET_ATTR, TARGET_CLASS } from './constants.js';
-import { clearAllMarks, ensureStyle, removeAttachedTargets } from './renderer.js';
+import { clearAllMarks, ensureStyle, removeAttachedTargets, updateTranslationFont } from './renderer.js';
 import { scanRoot, scanRoots, textExcludingTargets } from './scanner.js';
 import { TranslateScheduler } from './scheduler.js';
 import { TranslateTransport } from './transport.js';
+import { DEFAULT_PAGE_TRANSLATION_FONT, translationSettingsStorage } from '@extension/storage';
 import type { PageStatus, TransportInbound } from './types.js';
+import type { PageTranslationFontType, TranslationSettingsType } from '@extension/storage';
 
 const session = {
   status: 'idle' as PageStatus,
   sessionId: '' as string,
   errorMessage: '' as string,
   targetLang: '' as string,
+  pageTranslationFont: DEFAULT_PAGE_TRANSLATION_FONT as PageTranslationFontType,
   nextUnitIndex: 0,
   mutationObserver: null as MutationObserver | null,
   mutationTimer: 0 as number,
@@ -21,6 +24,7 @@ const session = {
 
 const transport = new TranslateTransport();
 const scheduler = new TranslateScheduler();
+let settingsSubscribed = false;
 
 const newSessionId = (): string => `s${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -208,19 +212,22 @@ const onTransportMessage = (msg: TransportInbound): void => {
   }
 };
 
+const applyTranslationSettings = (settings: TranslationSettingsType): void => {
+  session.targetLang = settings.targetLang;
+  session.pageTranslationFont = settings.pageTranslationFont;
+  updateTranslationFont(settings.pageTranslationFont);
+};
+
 const startTranslate = async (): Promise<{ ok: true } | { ok: false; message: string }> => {
   if (session.status !== 'idle') return { ok: true };
 
-  ensureStyle();
-
-  // Best-effort language filter; storage key matches @extension/storage.
   try {
-    const stored = await chrome.storage.local.get('translation-settings');
-    const raw = stored?.['translation-settings'] as { targetLang?: string } | undefined;
-    session.targetLang = raw?.targetLang ?? '';
+    applyTranslationSettings(await translationSettingsStorage.get());
   } catch {
     session.targetLang = '';
+    session.pageTranslationFont = DEFAULT_PAGE_TRANSLATION_FONT;
   }
+  ensureStyle(session.pageTranslationFont);
 
   session.sessionId = newSessionId();
   session.status = 'translating';
@@ -271,6 +278,15 @@ const stopTranslate = (): void => {
 };
 
 export const initImmersiveTranslate = (): void => {
+  if (!settingsSubscribed) {
+    settingsSubscribed = true;
+    void translationSettingsStorage.get().then(applyTranslationSettings);
+    translationSettingsStorage.subscribe(() => {
+      const settings = translationSettingsStorage.getSnapshot();
+      if (settings) applyTranslationSettings(settings);
+    });
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
 
