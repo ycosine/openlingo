@@ -1,6 +1,6 @@
 {
   "name": "openlingo",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "OpenLingo — open-source bilingual page translator (DeepL)",
   "license": "MIT",
   "private": true,

@@ -1,17 +1,27 @@
-#!/bin/bash
-# Usage: ./update_version.sh <new_version>
-# FORMAT IS <0.0.0>
+#!/usr/bin/env bash
 
-if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  find . -name 'package.json' -not -path '*/node_modules/*' -exec bash -c '
-    # Parse the version from package.json
-    current_version=$(grep -o "\"version\": \"[^\"]*" "$0" | cut -d"\"" -f4)
+set -euo pipefail
 
-    # Update the version
-    perl -i -pe"s/$current_version/'$1'/" "$0"
-  '  {} \;
+version="${1:-}"
 
-  echo "Updated versions to $1";
-else
-  echo "Version format <$1> isn't correct, proper format is <0.0.0>";
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Version format <$version> isn't correct, proper format is <0.0.0>."
+  exit 1
 fi
+
+# Only these packages define the shipped OpenLingo version. The other
+# workspace packages are private build tooling and keep their own versions.
+node - "$version" <<'NODE'
+const fs = require('node:fs');
+
+const version = process.argv[2];
+const packageFiles = ['package.json', 'chrome-extension/package.json'];
+
+for (const packageFile of packageFiles) {
+  const packageJson = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+  packageJson.version = version;
+  fs.writeFileSync(packageFile, `${JSON.stringify(packageJson, null, 2)}\n`);
+}
+NODE
+
+echo "Updated OpenLingo versions to $version."

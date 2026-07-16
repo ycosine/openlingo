@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   release:
-    name: Build & publish ${{ github.ref_name }}
+    name: Build & publish ${{ github.event.inputs.tag || github.ref_name }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,16 +36,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      - name: Verify tag matches package.json version
+      - name: Verify tag matches application versions
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "$PKG_VERSION" ]; then
-            echo "::error::Tag $TAG does not match package.json version $PKG_VERSION."
+          ROOT_VERSION="v$(node -p "require('./package.json').version")"
+          EXTENSION_VERSION="v$(node -p "require('./chrome-extension/package.json').version")"
+          if [ "$TAG" != "$ROOT_VERSION" ] || [ "$TAG" != "$EXTENSION_VERSION" ]; then
+            echo "::error::Tag $TAG does not match application versions."
+            echo "package.json: $ROOT_VERSION"
+            echo "chrome-extension/package.json: $EXTENSION_VERSION"
             echo "Run 'pnpm update-version ${TAG#v}' and re-tag before releasing."
             exit 1
           fi
-          echo "Tag and package version both at $TAG."
+          echo "Tag and application versions are all at $TAG."
 
       - name: Build & zip for Chromium
         run: pnpm zip
