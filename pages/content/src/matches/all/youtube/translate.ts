@@ -34,6 +34,15 @@ interface TranslateSession {
   onUpdate: (listener: () => void) => () => void;
 }
 
+interface IncrementalTranslateSession {
+  sessionId: string;
+  translations: CueTranslationMap;
+  append: (cues: Cue[]) => void;
+  cancel: () => void;
+  onUpdate: (listener: () => void) => () => void;
+  onError: (listener: (error: string) => void) => () => void;
+}
+
 interface StartCueTranslationOptions {
   /** Put the currently playing cue and future cues at the front of the provider queue. */
   priorityTimeMs?: number;
@@ -127,5 +136,77 @@ const startCueTranslation = (cues: Cue[], options: StartCueTranslationOptions = 
   };
 };
 
-export type { CueTranslationMap, StartCueTranslationOptions, TranslateSession };
-export { orderCuesForTranslation, startCueTranslation };
+const startIncrementalCueTranslation = (): IncrementalTranslateSession => {
+  const sessionId = newSessionId();
+  const translations: CueTranslationMap = new Map();
+  const listeners = new Set<() => void>();
+  const errorListeners = new Set<(error: string) => void>();
+  const queuedIds = new Set<number>();
+  const port = chrome.runtime.connect({ name: 'translate' });
+  let cancelled = false;
+
+  port.onMessage.addListener((msg: unknown) => {
+    if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
+    const message = msg as TranslateResultMessage | TranslateErrorMessage;
+    if (message.sessionId !== sessionId) return;
+    if (message.type === 'TR_TRANSLATE_RESULT') {
+      for (const result of message.results) {
+        const id = Number(result.id);
+        if (Number.isFinite(id)) translations.set(id, unescapeFromCache(result.html ?? '').trim());
+      }
+      for (const listener of listeners) listener();
+      return;
+    }
+    const error = `${message.code}: ${message.message}`;
+    for (const listener of errorListeners) listener(error);
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (cancelled) return;
+    const error = chrome.runtime.lastError?.message ?? 'Translation connection closed';
+    for (const listener of errorListeners) listener(error);
+  });
+
+  return {
+    sessionId,
+    translations,
+    append: cues => {
+      if (cancelled) return;
+      const fresh = cues.filter(cue => {
+        if (queuedIds.has(cue.id)) return false;
+        queuedIds.add(cue.id);
+        return true;
+      });
+      if (fresh.length === 0) return;
+      port.postMessage({
+        type: 'TR_TRANSLATE_BATCH',
+        sessionId,
+        units: fresh.map(cue => ({ id: String(cue.id), html: escapeForCache(cue.text) })),
+        maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY,
+      });
+    },
+    cancel: () => {
+      if (cancelled) return;
+      cancelled = true;
+      try {
+        port.postMessage({ type: 'TR_TRANSLATE_CANCEL', sessionId });
+      } catch {
+        // Port is already gone.
+      }
+      port.disconnect();
+      listeners.clear();
+      errorListeners.clear();
+    },
+    onUpdate: listener => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    onError: listener => {
+      errorListeners.add(listener);
+      return () => errorListeners.delete(listener);
+    },
+  };
+};
+
+export type { CueTranslationMap, IncrementalTranslateSession, StartCueTranslationOptions, TranslateSession };
+export { orderCuesForTranslation, startCueTranslation, startIncrementalCueTranslation };

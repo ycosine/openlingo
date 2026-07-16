@@ -1,9 +1,10 @@
 import '@src/Popup.css';
 import { useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
-import { providerCredentialsStorage, translationSettingsStorage } from '@extension/storage';
+import { asrCredentialsStorage, providerCredentialsStorage, translationSettingsStorage } from '@extension/storage';
 import { getProviderPreset, PROVIDER_PRESETS } from '@extension/translation';
 import { ErrorDisplay, LoadingSpinner } from '@extension/ui';
 import { useEffect, useRef, useState } from 'react';
+import type { AsrPrepareResponse, AsrSessionState, AsrStartResponse, YouTubeAsrContext } from '@extension/shared';
 import type { ProviderId } from '@extension/translation';
 import type { CSSProperties } from 'react';
 
@@ -676,6 +677,7 @@ const BodyHasKey = ({
 const Popup = () => {
   const settings = useStorage(translationSettingsStorage);
   const credsMap = useStorage(providerCredentialsStorage);
+  const asrCredentials = useStorage(asrCredentialsStorage);
   const providerId = settings.provider;
   const preset = getProviderPreset(providerId);
   const cred = credsMap?.[providerId] ?? {};
@@ -685,6 +687,12 @@ const Popup = () => {
   const [pageStatus, setPageStatus] = useState<PageStatus>('unknown');
   const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const [youtubeContext, setYoutubeContext] = useState<YouTubeAsrContext | null>(null);
+  const [asrState, setAsrState] = useState<AsrSessionState | null>(null);
+  const [asrPreparing, setAsrPreparing] = useState(false);
+  const [asrPrepared, setAsrPrepared] = useState(false);
+  const [asrError, setAsrError] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -699,6 +707,60 @@ const Popup = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    void (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (cancelled || !tab?.id || !tab.url || !/(^|\.)youtube\.com$/.test(new URL(tab.url).hostname)) return;
+      setActiveTabId(tab.id);
+      const context = await sendToActiveTab<YouTubeAsrContext>({ type: 'YT_ASR_CONTEXT' });
+      if (cancelled) return;
+      setYoutubeContext(context ?? { ok: false, message: 'Open a YouTube video first' });
+
+      const readState = async () => {
+        const state = (await chrome.runtime.sendMessage({
+          type: 'OL_ASR_GET_STATE',
+          tabId: tab.id,
+        })) as AsrSessionState;
+        if (!cancelled) setAsrState(state);
+      };
+      await readState();
+      timer = window.setInterval(() => void readState(), 700);
+
+      if (
+        context?.ok &&
+        !context.hasNativeCaptions &&
+        settings.videoSubtitles.youtubeAsrFallbackEnabled &&
+        asrCredentials.elevenlabsApiKey.trim()
+      ) {
+        setAsrPreparing(true);
+        const prepared = (await chrome.runtime.sendMessage({
+          type: 'OL_ASR_PREPARE',
+          tabId: tab.id,
+        })) as AsrPrepareResponse;
+        if (!cancelled) {
+          setAsrPrepared(!!prepared.ok && !!prepared.prepared);
+          setAsrError(prepared.ok ? '' : (prepared.message ?? 'Unable to prepare live transcription'));
+          setAsrPreparing(false);
+        }
+      }
+    })().catch(err => {
+      if (!cancelled) {
+        setAsrPreparing(false);
+        setAsrError((err as Error).message);
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [
+    asrCredentials.elevenlabsApiKey,
+    settings.videoSubtitles.youtubeAsrFallbackEnabled,
+    settings.videoSubtitles.youtubeAsrLanguage,
+  ]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -752,6 +814,43 @@ const Popup = () => {
   };
 
   const onOpenOptions = () => chrome.runtime.openOptionsPage();
+
+  const onStartAsr = async () => {
+    if (!activeTabId || !youtubeContext?.ok || !youtubeContext.videoId) return;
+    setAsrError('');
+    try {
+      const streamId = await new Promise<string>((resolve, reject) => {
+        chrome.tabCapture.getMediaStreamId({ targetTabId: activeTabId }, id => {
+          const error = chrome.runtime.lastError;
+          if (error || !id) reject(new Error(error?.message ?? 'Chrome did not provide an audio stream'));
+          else resolve(id);
+        });
+      });
+      const response = (await chrome.runtime.sendMessage({
+        type: 'OL_ASR_START',
+        tabId: activeTabId,
+        streamId,
+        context: {
+          videoId: youtubeContext.videoId,
+          videoTimeMs: youtubeContext.videoTimeMs ?? 0,
+          playbackRate: youtubeContext.playbackRate ?? 1,
+        },
+      })) as AsrStartResponse;
+      if (!response.ok) {
+        setAsrError(response.message ?? 'Unable to start live transcription');
+        return;
+      }
+      window.close();
+    } catch (err) {
+      setAsrError((err as Error).message);
+    }
+  };
+
+  const onStopAsr = async () => {
+    if (!activeTabId) return;
+    await chrome.runtime.sendMessage({ type: 'OL_ASR_STOP', tabId: activeTabId });
+    setAsrState({ tabId: activeTabId, videoId: youtubeContext?.videoId ?? '', status: 'idle' });
+  };
 
   const onPickLang = (code: string) => {
     void translationSettingsStorage.set(prev => ({ ...prev, targetLang: code }));
@@ -815,6 +914,62 @@ const Popup = () => {
       </div>
 
       <div style={{ padding: '4px 16px 14px' }}>
+        {activeTabId && youtubeContext && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '11px 12px',
+              border: `0.5px solid ${CARD_BORDER}`,
+              borderRadius: 10,
+              background: '#FFFFFFAA',
+            }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>YouTube live transcription</div>
+                <div style={{ marginTop: 3, fontSize: 11, lineHeight: 1.4, color: INK_SOFT }}>
+                  {youtubeContext.hasNativeCaptions
+                    ? 'YouTube captions detected. OpenLingo will use the original caption track.'
+                    : asrState && asrState.status !== 'idle'
+                      ? asrState.status === 'error'
+                        ? asrState.error || 'Transcription error'
+                        : `ElevenLabs Scribe · ${asrState.status}`
+                      : !settings.videoSubtitles.youtubeAsrFallbackEnabled
+                        ? 'Enable the ElevenLabs fallback in Video subtitle settings.'
+                        : !asrCredentials.elevenlabsApiKey.trim()
+                          ? 'Add an ElevenLabs API key in Options.'
+                          : asrPreparing
+                            ? 'Preparing a private single-use token…'
+                            : 'No caption track detected. Capture starts only after you click below.'}
+                </div>
+              </div>
+              {asrState && asrState.status !== 'idle' && asrState.status !== 'error' && (
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: '#2C7A5C', marginTop: 4 }} />
+              )}
+            </div>
+            {!youtubeContext.hasNativeCaptions && (
+              <div style={{ marginTop: 9 }}>
+                {asrState && asrState.status !== 'idle' && asrState.status !== 'error' ? (
+                  <button type="button" onClick={() => void onStopAsr()} style={secondaryBtn(INK)}>
+                    Stop live transcription
+                  </button>
+                ) : asrCredentials.elevenlabsApiKey.trim() ? (
+                  <button
+                    type="button"
+                    disabled={!asrPrepared || asrPreparing || !youtubeContext.ok}
+                    onClick={() => void onStartAsr()}
+                    style={primaryBtn(ACCENT, !asrPrepared || asrPreparing || !youtubeContext.ok)}>
+                    {asrPreparing ? 'Preparing…' : 'Start live transcription'}
+                  </button>
+                ) : (
+                  <button type="button" onClick={onOpenOptions} style={secondaryBtn(INK)}>
+                    Open Video subtitle settings
+                  </button>
+                )}
+              </div>
+            )}
+            {asrError && <div style={{ marginTop: 7, color: '#9A3838', fontSize: 11 }}>{asrError}</div>}
+          </div>
+        )}
         {popupState === 'noKey' ? (
           <BodyNoKey providerId={providerId} providerName={preset.name} onOpenOptions={onOpenOptions} />
         ) : (

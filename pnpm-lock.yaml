@@ -361,6 +361,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.3.1)(happy-dom@18.0.1)(jiti@2.5.1)(sass@1.92.1)(terser@5.44.0)(tsx@4.20.5)(yaml@2.8.1)
 
+  pages/offscreen:
+    dependencies:
+      '@extension/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@extension/hmr':
+        specifier: workspace:*
+        version: link:../../packages/hmr
+      '@extension/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@extension/vite-config':
+        specifier: workspace:*
+        version: link:../../packages/vite-config
+
   pages/options:
     dependencies:
       '@extension/i18n':

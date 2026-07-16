@@ -11,9 +11,9 @@ const BUTTON_ID = 'openlingo-yt-button';
 const MENU_ID = 'openlingo-yt-menu';
 const STYLE_TAG_ID = 'openlingo-yt-button-styles';
 
-type Status = 'idle' | 'translating' | 'translated' | 'no-cues' | 'error';
+type Status = 'idle' | 'listening' | 'translating' | 'translated' | 'no-cues' | 'error';
 
-type CaptionSource = 'ai' | 'human' | null;
+type CaptionSource = 'ai' | 'human' | 'asr' | null;
 
 interface ButtonState {
   enabled: boolean;
@@ -26,6 +26,9 @@ interface ButtonState {
   captionSource: CaptionSource;
   /** Download .srt is only meaningful once translations have arrived. */
   canDownloadSrt: boolean;
+  /** No timedtext track is available, so the popup can offer live ASR. */
+  asrFallback: boolean;
+  asrRunning: boolean;
 }
 
 interface ButtonCallbacks {
@@ -37,6 +40,8 @@ interface ButtonCallbacks {
   onHideButton: () => void;
   /** Export the active session as an .srt file. */
   onDownloadSrt: () => void;
+  /** Open the extension popup where tab capture can be started by a user gesture. */
+  onOpenPopup: () => void;
 }
 
 interface PlayerButtonHandle {
@@ -128,6 +133,9 @@ const ensureStyleTag = (): void => {
     }
     .openlingo-yt-button-dot[data-status="translating"] {
       background: #E2B23F;
+    }
+    .openlingo-yt-button-dot[data-status="listening"] {
+      background: #3FA678;
     }
     .openlingo-yt-button-dot[data-status="error"] {
       background: #C24A4A;
@@ -301,6 +309,8 @@ const buttonMarkHtml = (): string => `
 const headerLabelFor = (state: ButtonState): string => {
   if (!state.enabled) return 'OpenLingo paused';
   if (state.status === 'error') return 'Translation error';
+  if (state.captionSource === 'asr' && state.status === 'listening') return 'Listening with ElevenLabs';
+  if (state.captionSource === 'asr') return 'Using ElevenLabs live transcription';
   if (state.status === 'no-cues') return 'No captions available';
   if (state.needsCaptions) return 'Captions are off';
   if (state.captionSource === 'ai') return 'Using auto-generated captions';
@@ -333,6 +343,8 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
       value.needsCaptions,
       value.captionSource ?? '',
       value.canDownloadSrt,
+      value.asrFallback,
+      value.asrRunning,
     ].join('|');
 
   const buildButtonElement = (): HTMLButtonElement => {
@@ -365,7 +377,12 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
         state.enabled && state.needsCaptions && state.status !== 'translating' && state.status !== 'translated';
       dot.setAttribute('data-needs-captions', showCaptionsHint ? '1' : '0');
     }
-    btn.title = state.enabled && state.needsCaptions ? 'OpenLingo — turn on YouTube CC to start' : 'OpenLingo';
+    btn.title =
+      state.enabled && state.asrRunning
+        ? 'OpenLingo — ElevenLabs live transcription'
+        : state.enabled && state.needsCaptions
+          ? 'OpenLingo — turn on YouTube CC to start'
+          : 'OpenLingo';
   };
 
   const removeMenu = (): void => {
@@ -385,8 +402,14 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
 
     const menu = document.createElement('div');
     menu.id = MENU_ID;
-    const showCallout =
+    const showCaptionsCallout =
       state.enabled && state.needsCaptions && state.status !== 'translating' && state.status !== 'translated';
+    const showAsrCallout =
+      state.enabled &&
+      state.asrFallback &&
+      !state.asrRunning &&
+      state.status !== 'translating' &&
+      state.status !== 'translated';
     const headerLabel = headerLabelFor(state);
     menu.innerHTML = `
       <div class="openlingo-yt-menu-header">
@@ -399,16 +422,26 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
           : ''
       }
       ${
-        showCallout
+        showCaptionsCallout || showAsrCallout
           ? `<div class="openlingo-yt-menu-caption-notice">
               <div class="openlingo-yt-menu-caption-notice-title">
                 ${captionAlertSvg(14)}
-                <span>Turn on YouTube captions to start translating</span>
+                <span>${
+                  showAsrCallout
+                    ? 'No caption track? Use live transcription'
+                    : 'Turn on YouTube captions to start translating'
+                }</span>
               </div>
               <div class="openlingo-yt-menu-caption-notice-body">
-                OpenLingo translates the captions YouTube provides, so the player's CC button needs to be on for this video.
+                ${
+                  showAsrCallout
+                    ? 'Open the OpenLingo toolbar popup to start user-approved ElevenLabs audio transcription.'
+                    : "OpenLingo translates the captions YouTube provides, so the player's CC button needs to be on for this video."
+                }
               </div>
-              <button type="button" class="openlingo-yt-menu-caption-notice-cta" data-action="enable-captions">Turn on CC</button>
+              <button type="button" class="openlingo-yt-menu-caption-notice-cta" data-action="${
+                showAsrCallout ? 'open-popup' : 'enable-captions'
+              }">${showAsrCallout ? 'Open OpenLingo' : 'Turn on CC'}</button>
             </div>`
           : ''
       }
@@ -442,6 +475,12 @@ const createPlayerButton = (callbacks: ButtonCallbacks, initial: ButtonState): P
       const action = trigger.getAttribute('data-action');
       if (action === 'enable-captions') {
         callbacks.onEnableCaptions();
+        return;
+      }
+      if (action === 'open-popup') {
+        callbacks.onOpenPopup();
+        menuOpen = false;
+        paintMenu();
         return;
       }
       if (action === 'toggle') {
