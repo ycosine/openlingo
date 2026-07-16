@@ -22,12 +22,12 @@ const PAGE_FONT_FAMILIES: Record<PageTranslationFontType, string> = {
   serif: 'Georgia, "Times New Roman", "Songti SC", SimSun, serif',
 };
 
-const fontAssetUrl = (): string => chrome.runtime.getURL('options/fonts/LXGWWenKaiLite-Regular.ttf');
+const fontAssetUrl = (): string => chrome.runtime.getURL('options/fonts/LXGWWenKaiLite-Regular.woff2');
 
 const styleText = (pageFont: PageTranslationFontType): string => `
 @font-face {
   font-family: "OpenLingo LXGW WenKai Lite";
-  src: url("${fontAssetUrl()}") format("truetype");
+  src: url("${fontAssetUrl()}") format("woff2");
   font-style: normal;
   font-weight: 400;
   font-display: swap;

@@ -1,6 +1,6 @@
 @font-face {
   font-family: 'OpenLingo LXGW WenKai Lite';
-  src: url('/options/fonts/LXGWWenKaiLite-Regular.ttf') format('truetype');
+  src: url('/options/fonts/LXGWWenKaiLite-Regular.woff2') format('woff2');
   font-style: normal;
   font-weight: 400;
   font-display: swap;

@@ -18,12 +18,14 @@ const TRANSLATION_CLASS = 'openlingo-yt-translation';
 type OverlayMode = 'native-translation' | 'standalone-bilingual';
 
 const STYLE_FONTS: Record<SubtitleStyleType, string> = {
+  wenkai: '"OpenLingo LXGW WenKai Lite", "Kaiti SC", KaiTi, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
   sans: '"Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
   mono: '"Geist Mono", ui-monospace, "SF Mono", monospace',
 };
 
 const STYLE_ITALIC: Record<SubtitleStyleType, string> = {
+  wenkai: 'normal',
   serif: 'italic',
   sans: 'normal',
   mono: 'normal',
@@ -53,6 +55,13 @@ interface CreateOverlayOptions {
 const ensureStyleTag = (preset: SubtitleStyleType): void => {
   const existing = document.getElementById(STYLE_TAG_ID) as HTMLStyleElement | null;
   const css = `
+    @font-face {
+      font-family: "OpenLingo LXGW WenKai Lite";
+      src: url("${chrome.runtime.getURL('options/fonts/LXGWWenKaiLite-Regular.woff2')}") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
     #${ROOT_ID} {
       position: absolute;
       z-index: 62;
@@ -75,6 +84,9 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
       box-decoration-break: clone;
       font-family: ${STYLE_FONTS[preset]};
       font-style: ${STYLE_ITALIC[preset]};
+      /* CJK glyphs read larger than Latin at equal px; render the translated
+         line slightly smaller than the platform caption size. */
+      font-size: 0.9em;
       color: #fff;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
       letter-spacing: 0;
@@ -103,6 +115,10 @@ const ensureStyleTag = (preset: SubtitleStyleType): void => {
     #${ROOT_ID} .openlingo-yt-line {
       min-height: 1em;
       margin-top: 0.2em;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
     }
     #${ROOT_ID} .openlingo-yt-line:first-child {
       margin-top: 0;
@@ -127,6 +143,15 @@ const findActiveCue = (cues: Cue[], timeMs: number, startHint: number): { cue: C
   const cue = cues[i];
   if (!cue || timeMs < cue.startMs) return { cue: null, index: i };
   return { cue, index: i };
+};
+
+/** Most recent cue that has already started. Lets the bilingual overlay keep
+ *  showing the previous sentence's translation while a new partial streams. */
+const findLatestStartedCue = (cues: Cue[], timeMs: number): Cue | null => {
+  for (let i = cues.length - 1; i >= 0; i--) {
+    if (cues[i].startMs <= timeMs) return cues[i];
+  }
+  return null;
 };
 
 const findVideoElement = (): HTMLVideoElement | null =>
@@ -215,7 +240,7 @@ const syncStandalonePosition = (root: HTMLElement, fontScale: number): void => {
   const player = findPlayerElement();
   if (!player) return;
   const playerRect = player.getBoundingClientRect();
-  const baseFont = Math.min(27, Math.max(15, playerRect.width * 0.021));
+  const baseFont = Math.min(24, Math.max(14, playerRect.width * 0.019));
   root.style.fontSize = `${baseFont * fontScale}px`;
   root.style.lineHeight = '1.35';
   root.style.fontWeight = '600';
@@ -247,8 +272,8 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     if (translationLine && translationLine.textContent !== translation) translationLine.textContent = translation;
     const originalWrap = originalLine?.parentElement;
     const translationWrap = translationLine?.parentElement;
-    if (originalWrap) originalWrap.style.display = original ? 'block' : 'none';
-    if (translationWrap) translationWrap.style.display = translation ? 'block' : 'none';
+    if (originalWrap) originalWrap.style.display = original ? '' : 'none';
+    if (translationWrap) translationWrap.style.display = translation ? '' : 'none';
   };
 
   const tick = (): void => {
@@ -283,7 +308,12 @@ const createOverlay = (initial: CreateOverlayOptions): OverlayHandle => {
     }
 
     const original = partialText || cue?.text || '';
-    const translation = partialText || !cue ? '' : (translations.get(cue.id)?.trim() ?? '');
+    // In bilingual mode the translation lags one sentence: while a new partial
+    // streams, keep showing the latest committed cue's translation instead of
+    // blanking the line (translations arrive after the cue was committed).
+    const translationSource =
+      mode === 'standalone-bilingual' ? (cue ?? findLatestStartedCue(cues, timeMs)) : partialText ? null : cue;
+    const translation = translationSource ? (translations.get(translationSource.id)?.trim() ?? '') : '';
     if (mode === 'native-translation' && !translation) {
       hideRoot(root);
       lastRenderedCueId = cue?.id ?? null;

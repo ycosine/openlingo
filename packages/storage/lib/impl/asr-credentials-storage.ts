@@ -9,7 +9,7 @@ const asrCredentialsStorage: BaseStorageType<AsrCredentialsType> = createStorage
   'asr-credentials',
   { elevenlabsApiKey: '' },
   {
-    storageEnum: StorageEnum.Local,
+    storageEnum: StorageEnum.Sync,
     liveUpdate: true,
   },
 );

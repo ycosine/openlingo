@@ -161,6 +161,7 @@ const StyleSegmented = ({
   onChange: (v: SubtitleStyleType) => void;
 }) => {
   const options: Array<{ id: SubtitleStyleType; label: string }> = [
+    { id: 'wenkai', label: '文楷' },
     { id: 'serif', label: 'Serif italic' },
     { id: 'sans', label: 'Sans' },
     { id: 'mono', label: 'Mono' },
@@ -203,11 +204,13 @@ const StyleSegmented = ({
 
 const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontScale: SubtitleFontScaleType }) => {
   const fontStack =
-    style === 'serif'
-      ? 'Georgia, "Times New Roman", serif'
-      : style === 'mono'
-        ? '"Geist Mono", ui-monospace, monospace'
-        : '"Geist", system-ui, sans-serif';
+    style === 'wenkai'
+      ? '"OpenLingo LXGW WenKai Lite", "Kaiti SC", KaiTi, sans-serif'
+      : style === 'serif'
+        ? 'Georgia, "Times New Roman", serif'
+        : style === 'mono'
+          ? '"Geist Mono", ui-monospace, monospace'
+          : '"Geist", system-ui, sans-serif';
   const italic = style === 'serif' ? 'italic' : 'normal';
   return (
     <div
@@ -256,7 +259,7 @@ const PreviewPlayer = ({ style, fontScale }: { style: SubtitleStyleType; fontSca
             fontFamily: fontStack,
             fontStyle: italic,
             opacity: 0.9,
-            fontSize: 13 * fontScale,
+            fontSize: 13 * fontScale * 0.9,
             lineHeight: 1.35,
             textShadow: '0 1px 2px rgba(0,0,0,0.5)',
           }}>

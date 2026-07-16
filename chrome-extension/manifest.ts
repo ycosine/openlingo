@@ -7,6 +7,15 @@ const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 const manifest = {
   manifest_version: 3,
   default_locale: 'en',
+  // Pin the extension ID for Chromium so unpacked/zip installs from any
+  // directory keep the same ID, which keeps chrome.storage (and the sync
+  // area's cloud copy) attached across reinstalls. Firefox gets a stable ID
+  // from browser_specific_settings.gecko.id instead.
+  ...(!IS_FIREFOX
+    ? {
+        key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyCiZy5eJO3f0er1R0gwvgkXud5ZVeD1f99TI6qc8Jetvr5oO2j5FHr3S5kcJUojZhLyHWmtOLevr4kQTfLybl4l8dZaNK6LhU4W3RjOVtIbstxZmueWJ0f1+dwFFwgAH/Es3T71W9Of+rGhKPBQtAneEOtiOWNR4ia5DCNi0tfORdXIXqpseNU/v1UZcvUOyvkVITM97tiNE7+hfilYZY/KYWCIzNhb+X0PIJUlyPeS9RM/hnrPyj75pgS0Rbg5YcqiMnss/CbCiVHCCwaqxOYb231FGc1PHsHICVySmy7tJepuKFyGCDRw9FFeAjT1LNTuaP95OqCZTi4a+4WqkBwIDAQAB',
+      }
+    : {}),
   name: '__MSG_extensionName__',
   browser_specific_settings: {
     gecko: {
@@ -46,7 +55,7 @@ const manifest = {
   ],
   web_accessible_resources: [
     {
-      resources: ['*.js', '*.css', 'icon-128.png', 'icon-34.png', 'options/fonts/*.ttf'],
+      resources: ['*.js', '*.css', 'icon-128.png', 'icon-34.png', 'options/fonts/*.woff2'],
       matches: ['*://*/*'],
     },
   ],

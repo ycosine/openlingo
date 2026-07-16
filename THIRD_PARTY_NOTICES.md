@@ -2,7 +2,8 @@
 
 ## LXGW WenKai Lite
 
-OpenLingo bundles `LXGWWenKaiLite-Regular.ttf` from
+OpenLingo bundles `LXGWWenKaiLite-Regular.woff2`, converted losslessly to the
+WOFF2 container from the official `LXGWWenKaiLite-Regular.ttf` in
 [LXGW WenKai Lite v1.522](https://github.com/lxgw/LxgwWenKai-Lite/releases/tag/v1.522).
 
 Copyright 2021-2026 LXGW and 2020 The Klee Project Authors.
