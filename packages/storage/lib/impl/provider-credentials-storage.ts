@@ -1,7 +1,7 @@
 import { createStorage, StorageEnum } from '../base/index.js';
 import type { BaseStorageType } from '../base/index.js';
 
-type ProviderIdLike = 'google-free' | 'deepl' | 'openai-compatible';
+type ProviderIdLike = 'google-free' | 'deepl' | 'anthropic' | 'deepseek' | 'openai' | 'openai-compatible';
 
 interface ProviderCredentialEntry {
   apiKey?: string;

@@ -1,4 +1,4 @@
-export type ProviderId = 'google-free' | 'deepl' | 'openai-compatible';
+export type ProviderId = 'google-free' | 'deepl' | 'anthropic' | 'deepseek' | 'openai' | 'openai-compatible';
 
 export type CredentialField = 'apiKey' | 'baseUrl' | 'model' | 'systemPrompt';
 

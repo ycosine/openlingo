@@ -1,6 +1,11 @@
+import { createAnthropicProvider } from './providers/anthropic.js';
 import { createDeepLProvider } from './providers/deepl.js';
 import { createGoogleFreeProvider } from './providers/google-free.js';
-import { createOpenAICompatibleProvider } from './providers/openai-compatible.js';
+import {
+  createDeepSeekProvider,
+  createOpenAICompatibleProvider,
+  createOpenAIProvider,
+} from './providers/openai-compatible.js';
 import type { CredentialField, ProviderCredential, ProviderId, TranslationProvider } from './types.js';
 
 export const getProvider = (id: ProviderId, cred: ProviderCredential): TranslationProvider => {
@@ -9,6 +14,12 @@ export const getProvider = (id: ProviderId, cred: ProviderCredential): Translati
       return createGoogleFreeProvider();
     case 'deepl':
       return createDeepLProvider(cred.apiKey ?? '');
+    case 'anthropic':
+      return createAnthropicProvider(cred);
+    case 'deepseek':
+      return createDeepSeekProvider(cred);
+    case 'openai':
+      return createOpenAIProvider(cred);
     case 'openai-compatible':
       return createOpenAICompatibleProvider(cred);
     default: {
@@ -45,14 +56,40 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     credentialFields: ['apiKey'],
   },
   {
-    id: 'openai-compatible',
+    id: 'anthropic',
+    name: 'Anthropic',
+    tier: 'Claude',
+    endpoint: 'api.anthropic.com',
+    defaults: {
+      model: 'claude-opus-4-8',
+    },
+    credentialFields: ['model', 'apiKey', 'systemPrompt'],
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    tier: 'Chat',
+    endpoint: 'api.deepseek.com',
+    defaults: {
+      model: 'deepseek-chat',
+    },
+    credentialFields: ['model', 'apiKey', 'systemPrompt'],
+  },
+  {
+    id: 'openai',
     name: 'OpenAI',
-    tier: 'Compatible',
+    tier: 'GPT',
     endpoint: 'api.openai.com',
     defaults: {
-      baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',
     },
+    credentialFields: ['model', 'apiKey', 'systemPrompt'],
+  },
+  {
+    id: 'openai-compatible',
+    name: 'Custom',
+    tier: 'OpenAI-compatible',
+    endpoint: 'custom endpoint',
     credentialFields: ['baseUrl', 'model', 'apiKey', 'systemPrompt'],
   },
 ];
