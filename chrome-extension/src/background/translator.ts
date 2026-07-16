@@ -6,6 +6,7 @@ import type {
   TranslateBatchRequest,
   TranslateCancelRequest,
   TranslateErrorMessage,
+  TranslatePartialMessage,
   TranslateResultMessage,
 } from './translate-session';
 import type { ProviderCredential, ProviderId } from '@extension/translation';
@@ -18,7 +19,7 @@ interface TranslateValidateRequest {
   apiKey?: string;
 }
 
-type Outbound = TranslateResultMessage | TranslateErrorMessage | TranslateBackoffMessage;
+type Outbound = TranslateResultMessage | TranslatePartialMessage | TranslateErrorMessage | TranslateBackoffMessage;
 
 /** Sessions keyed by port; one session object per connected content script. */
 const portSessions = new Map<chrome.runtime.Port, TranslateSession>();
@@ -63,7 +64,7 @@ const attachPortSession = (port: chrome.runtime.Port): void => {
         session = new TranslateSession(req.sessionId, sink);
         portSessions.set(port, session);
       }
-      session.enqueue(req.units, req.maxConcurrency);
+      session.enqueue(req.units, req.maxConcurrency, req.wantPartials);
       return;
     }
 
@@ -108,7 +109,7 @@ export const registerTranslatorMessageHandlers = (): void => {
         entry = { session, tabId };
         legacySessions.set(req.sessionId, entry);
       }
-      entry.session.enqueue(req.units, req.maxConcurrency);
+      entry.session.enqueue(req.units, req.maxConcurrency, req.wantPartials);
       sendResponse({ ok: true });
       return;
     }
