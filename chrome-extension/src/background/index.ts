@@ -1,8 +1,10 @@
 import 'webextension-polyfill';
 import { registerAsrMessageHandlers } from './asr';
+import { migrateLocalSettingsToSync } from './storage-migration';
 import { registerTranslatorMessageHandlers } from './translator';
 import { registerYouTubeWatcher } from './youtube-watcher';
 
+void migrateLocalSettingsToSync();
 registerTranslatorMessageHandlers();
 registerYouTubeWatcher();
 registerAsrMessageHandlers();

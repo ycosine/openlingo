@@ -7,7 +7,7 @@ type DisplayStyleType = 'block' | 'replace';
 
 type PageTranslationFontType = 'lxgw-wenkai-lite' | 'page' | 'sans' | 'serif';
 
-type SubtitleStyleType = 'serif' | 'sans' | 'mono';
+type SubtitleStyleType = 'wenkai' | 'serif' | 'sans' | 'mono';
 
 type SubtitleFontScaleType = 0.65 | 0.75 | 0.85 | 1;
 
@@ -65,7 +65,7 @@ const VIDEO_SUBTITLES_DEFAULTS: VideoSubtitlesSettingsType = {
   meetingsAutoEnable: true,
   preferHumanCaptions: true,
   filterAmbient: true,
-  subtitleStyle: 'serif',
+  subtitleStyle: 'wenkai',
   subtitleFontScale: 1,
 };
 
@@ -80,8 +80,13 @@ const DEFAULTS: TranslationSettingsType = {
 
 const SUBTITLE_FONT_SCALES: readonly SubtitleFontScaleType[] = [0.65, 0.75, 0.85, 1];
 
+const SUBTITLE_STYLES: readonly SubtitleStyleType[] = ['wenkai', 'serif', 'sans', 'mono'];
+
 const normalizeSubtitleFontScale = (value: unknown): SubtitleFontScaleType =>
   SUBTITLE_FONT_SCALES.includes(value as SubtitleFontScaleType) ? (value as SubtitleFontScaleType) : 1;
+
+const normalizeSubtitleStyle = (value: unknown): SubtitleStyleType =>
+  SUBTITLE_STYLES.includes(value as SubtitleStyleType) ? (value as SubtitleStyleType) : 'wenkai';
 
 const normalizePageTranslationFont = (value: unknown): PageTranslationFontType =>
   PAGE_TRANSLATION_FONTS.includes(value as PageTranslationFontType)
@@ -105,6 +110,7 @@ const normalize = (value: TranslationSettingsType | null | undefined): Translati
     videoSubtitles: {
       ...VIDEO_SUBTITLES_DEFAULTS,
       ...partial,
+      subtitleStyle: normalizeSubtitleStyle(partial.subtitleStyle),
       subtitleFontScale: normalizeSubtitleFontScale(partial.subtitleFontScale),
     },
   };
@@ -114,11 +120,13 @@ const normalize = (value: TranslationSettingsType | null | undefined): Translati
   return normalized;
 };
 
+// Sync storage so preferences survive uninstall/reinstall and follow the
+// signed-in browser profile. The translation cache stays in Local storage.
 const baseStorage: BaseStorageType<TranslationSettingsType> = createStorage<TranslationSettingsType>(
   'translation-settings',
   DEFAULTS,
   {
-    storageEnum: StorageEnum.Local,
+    storageEnum: StorageEnum.Sync,
     liveUpdate: true,
   },
 );

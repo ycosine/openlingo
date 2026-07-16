@@ -23,7 +23,7 @@ describe('translation typography', () => {
     ensureStyle();
 
     const css = document.getElementById(STYLE_ELEMENT_ID)?.textContent ?? '';
-    expect(css).toContain('chrome-extension://openlingo/options/fonts/LXGWWenKaiLite-Regular.ttf');
+    expect(css).toContain('chrome-extension://openlingo/options/fonts/LXGWWenKaiLite-Regular.woff2');
     expect(css).toContain('font-family: "OpenLingo LXGW WenKai Lite", "Kaiti SC", KaiTi, serif');
   });
 

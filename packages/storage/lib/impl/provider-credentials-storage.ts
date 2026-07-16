@@ -14,11 +14,13 @@ type ProviderCredentialsMap = Partial<Record<ProviderIdLike, ProviderCredentialE
 
 const STORAGE_KEY = 'provider-credentials';
 
+// Sync storage so credentials survive uninstall/reinstall and follow the
+// signed-in browser profile. Values are small and fit the per-item quota.
 const base: BaseStorageType<ProviderCredentialsMap> = createStorage<ProviderCredentialsMap>(
   STORAGE_KEY,
   {},
   {
-    storageEnum: StorageEnum.Local,
+    storageEnum: StorageEnum.Sync,
     liveUpdate: true,
   },
 );
