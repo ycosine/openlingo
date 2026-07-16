@@ -88,7 +88,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'openai-compatible',
     name: 'Custom',
-    tier: 'OpenAI-compatible',
+    tier: 'OpenAI API',
     endpoint: 'custom endpoint',
     credentialFields: ['baseUrl', 'model', 'apiKey', 'systemPrompt'],
   },

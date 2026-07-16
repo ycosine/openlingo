@@ -5,7 +5,7 @@ import { getProviderPreset, PROVIDER_PRESETS } from '@extension/translation';
 import { ErrorDisplay, LoadingSpinner } from '@extension/ui';
 import { useEffect, useRef, useState } from 'react';
 import type { AsrPrepareResponse, AsrSessionState, AsrStartResponse, YouTubeAsrContext } from '@extension/shared';
-import type { ProviderId } from '@extension/translation';
+import type { ProviderId, ProviderPreset } from '@extension/translation';
 import type { CSSProperties } from 'react';
 
 type PageStatus = 'idle' | 'translating' | 'translated' | 'unknown';
@@ -451,7 +451,15 @@ const LanguageMenu = ({ active, onPick }: { active: string; onPick: (code: strin
   </div>
 );
 
-const ProviderMenu = ({ active, onPick }: { active: ProviderId; onPick: (id: ProviderId) => void }) => (
+const ProviderMenu = ({
+  presets,
+  active,
+  onPick,
+}: {
+  presets: ProviderPreset[];
+  active: ProviderId;
+  onPick: (id: ProviderId) => void;
+}) => (
   <div
     style={{
       position: 'absolute',
@@ -476,7 +484,7 @@ const ProviderMenu = ({ active, onPick }: { active: ProviderId; onPick: (id: Pro
       }}>
       Provider
     </div>
-    {PROVIDER_PRESETS.map(p => {
+    {presets.map(p => {
       const isActive = p.id === active;
       return (
         <button
@@ -925,6 +933,22 @@ const Popup = () => {
         : pageStatus === 'translated'
           ? 'translated'
           : 'idle';
+  // Only offer providers that are ready to use (key configured, or keyless
+  // like Google); keep the active one visible so the selection is never hidden.
+  const menuPresets = PROVIDER_PRESETS.filter(
+    p => p.id === providerId || getProviderStatus(p.id, credsMap?.[p.id] ?? {}).isReady,
+  );
+  // The popup window sizes itself to the document and the root clips overflow,
+  // so absolutely-positioned menus get cut off. Reserve height while one is
+  // open; Chrome resizes the popup and shrinks it back on close.
+  const rootMinHeight =
+    openMenu === 'provider'
+      ? menuPresets.length * 33 + 130
+      : openMenu === 'lang'
+        ? activeTabId && youtubeContext
+          ? 540
+          : 420
+        : undefined;
   const providerSummary = !status.isReady
     ? `${preset.name} · no key`
     : providerId === 'openai-compatible' ||
@@ -941,6 +965,9 @@ const Popup = () => {
       ref={rootRef}
       style={{
         width: 360,
+        minHeight: rootMinHeight,
+        display: 'flex',
+        flexDirection: 'column',
         position: 'relative',
         background: BG,
         overflow: 'hidden',
@@ -970,7 +997,7 @@ const Popup = () => {
         </button>
       </div>
 
-      <div style={{ padding: '4px 16px 14px' }}>
+      <div style={{ padding: '4px 16px 14px', flex: '1 0 auto' }}>
         {activeTabId && youtubeContext && (
           <div
             style={{
@@ -1086,7 +1113,7 @@ const Popup = () => {
           </span>
         </button>
 
-        {openMenu === 'provider' && <ProviderMenu active={providerId} onPick={onPickProvider} />}
+        {openMenu === 'provider' && <ProviderMenu presets={menuPresets} active={providerId} onPick={onPickProvider} />}
       </div>
     </div>
   );
