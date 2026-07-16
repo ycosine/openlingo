@@ -17,6 +17,10 @@ export interface TranslateRequest {
   targetLang: string;
   tagHandling?: TagHandling;
   signal?: AbortSignal;
+  /** Streaming hook: called with the accumulated translation of texts[index]
+   *  as tokens arrive. Only providers with streaming APIs invoke it; the
+   *  resolved translate() result remains the authoritative final text. */
+  onPartial?: (index: number, text: string) => void;
 }
 
 export interface ValidateResult {

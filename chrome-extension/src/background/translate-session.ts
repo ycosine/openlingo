@@ -12,6 +12,8 @@ interface TranslateBatchRequest {
   sessionId: string;
   units: TranslateUnit[];
   maxConcurrency?: number;
+  /** Opt in to TR_TRANSLATE_PARTIAL streaming updates for this session. */
+  wantPartials?: boolean;
 }
 
 interface TranslateCancelRequest {
@@ -23,6 +25,15 @@ interface TranslateResultMessage {
   type: 'TR_TRANSLATE_RESULT';
   sessionId: string;
   results: Array<{ id: string; html: string }>;
+}
+
+/** Streaming interim translation for one unit. Superseded by the final
+ *  TR_TRANSLATE_RESULT carrying the same id. */
+interface TranslatePartialMessage {
+  type: 'TR_TRANSLATE_PARTIAL';
+  sessionId: string;
+  id: string;
+  html: string;
 }
 
 interface TranslateErrorMessage {
@@ -38,9 +49,11 @@ interface TranslateBackoffMessage {
   extendMs: number;
 }
 
-type Outbound = TranslateResultMessage | TranslateErrorMessage | TranslateBackoffMessage;
+type Outbound = TranslateResultMessage | TranslatePartialMessage | TranslateErrorMessage | TranslateBackoffMessage;
 
 const MAX_CONCURRENCY = 3;
+/** Minimum gap between streamed partial updates per unit. */
+const PARTIAL_THROTTLE_MS = 150;
 const BACKOFF_MS = [1000, 4000, 10_000] as const;
 const BACKOFF_EXTEND_MS = 15_000;
 const MAX_RATE_RETRIES = 3;
@@ -166,17 +179,19 @@ class TranslateSession {
   private concurrency = MAX_CONCURRENCY;
   private closed = false;
   private running = false;
+  private wantPartials = false;
 
   constructor(sessionId: string, sink: SessionSink) {
     this.sessionId = sessionId;
     this.sink = sink;
   }
 
-  enqueue(units: TranslateUnit[], maxConcurrency?: number): void {
+  enqueue(units: TranslateUnit[], maxConcurrency?: number, wantPartials?: boolean): void {
     if (this.closed) return;
     if (typeof maxConcurrency === 'number' && Number.isFinite(maxConcurrency)) {
       this.concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(maxConcurrency)));
     }
+    if (wantPartials) this.wantPartials = true;
     this.queue.push(...units);
     void this.start();
   }
@@ -291,12 +306,34 @@ class TranslateSession {
           });
         }
 
+        const lastPartialAt = new Map<number, number>();
         const translated = await provider.translate({
           texts,
           sourceLang,
           targetLang,
           tagHandling: provider.preservesHtml ? 'html' : 'none',
           signal: this.controller.signal,
+          // Forward streamed interim translations (throttled per unit). Only
+          // emitted when the client opted in and for providers that preserve
+          // HTML natively — placeholder restoration for the others happens
+          // after the full result.
+          onPartial:
+            this.wantPartials && provider.preservesHtml
+              ? (index, text) => {
+                  if (this.closed || this.controller.signal.aborted) return;
+                  const unit = units[index];
+                  if (!unit || !text) return;
+                  const now = Date.now();
+                  if (now - (lastPartialAt.get(index) ?? 0) < PARTIAL_THROTTLE_MS) return;
+                  lastPartialAt.set(index, now);
+                  this.sink({
+                    type: 'TR_TRANSLATE_PARTIAL',
+                    sessionId: this.sessionId,
+                    id: unit.id,
+                    html: text,
+                  });
+                }
+              : undefined,
         });
 
         const restored = tagsPerUnit
@@ -354,6 +391,7 @@ export type {
   TranslateBatchRequest,
   TranslateCancelRequest,
   TranslateErrorMessage,
+  TranslatePartialMessage,
   TranslateResultMessage,
   TranslateUnit,
 };

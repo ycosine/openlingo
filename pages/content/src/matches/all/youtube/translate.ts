@@ -14,6 +14,13 @@ interface TranslateResultMessage {
   results: Array<{ id: string; html: string }>;
 }
 
+interface TranslatePartialMessage {
+  type: 'TR_TRANSLATE_PARTIAL';
+  sessionId: string;
+  id: string;
+  html: string;
+}
+
 interface TranslateErrorMessage {
   type: 'TR_TRANSLATE_ERROR';
   sessionId: string;
@@ -78,19 +85,29 @@ const startCueTranslation = (cues: Cue[], options: StartCueTranslationOptions = 
   });
 
   let cancelled = false;
+  // Streaming partials also land in `translations`, so completion must count
+  // only units that received their final result.
+  const finalIds = new Set<number>();
 
   const handler = (msg: unknown) => {
     if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
-    const m = msg as TranslateResultMessage | TranslateErrorMessage;
+    const m = msg as TranslateResultMessage | TranslatePartialMessage | TranslateErrorMessage;
     if (m.sessionId !== sessionId) return;
-    if (m.type === 'TR_TRANSLATE_RESULT') {
+    if (m.type === 'TR_TRANSLATE_PARTIAL') {
+      const idNum = Number(m.id);
+      if (Number.isFinite(idNum) && !finalIds.has(idNum)) {
+        translations.set(idNum, unescapeFromCache(m.html ?? '').trim());
+        notify();
+      }
+    } else if (m.type === 'TR_TRANSLATE_RESULT') {
       for (const r of m.results) {
         const idNum = Number(r.id);
         if (!Number.isFinite(idNum)) continue;
         translations.set(idNum, unescapeFromCache(r.html ?? '').trim());
+        finalIds.add(idNum);
       }
       notify();
-      if (translations.size >= cues.length) {
+      if (finalIds.size >= cues.length) {
         chrome.runtime.onMessage.removeListener(handler);
         resolveFinished({ ok: true });
       }
@@ -110,7 +127,13 @@ const startCueTranslation = (cues: Cue[], options: StartCueTranslationOptions = 
   const queuedCues = orderCuesForTranslation(cues, options.priorityTimeMs);
   const units = queuedCues.map(c => ({ id: String(c.id), html: escapeForCache(c.text) }));
   chrome.runtime
-    .sendMessage({ type: 'TR_TRANSLATE_BATCH', sessionId, units, maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY })
+    .sendMessage({
+      type: 'TR_TRANSLATE_BATCH',
+      sessionId,
+      units,
+      maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY,
+      wantPartials: true,
+    })
     .catch(err => {
       chrome.runtime.onMessage.removeListener(handler);
       resolveFinished({ ok: false, error: String(err) });
@@ -145,14 +168,26 @@ const startIncrementalCueTranslation = (): IncrementalTranslateSession => {
   const port = chrome.runtime.connect({ name: 'translate' });
   let cancelled = false;
 
+  const finalIds = new Set<number>();
+
   port.onMessage.addListener((msg: unknown) => {
     if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
-    const message = msg as TranslateResultMessage | TranslateErrorMessage;
+    const message = msg as TranslateResultMessage | TranslatePartialMessage | TranslateErrorMessage;
     if (message.sessionId !== sessionId) return;
+    if (message.type === 'TR_TRANSLATE_PARTIAL') {
+      const id = Number(message.id);
+      if (Number.isFinite(id) && !finalIds.has(id)) {
+        translations.set(id, unescapeFromCache(message.html ?? '').trim());
+        for (const listener of listeners) listener();
+      }
+      return;
+    }
     if (message.type === 'TR_TRANSLATE_RESULT') {
       for (const result of message.results) {
         const id = Number(result.id);
-        if (Number.isFinite(id)) translations.set(id, unescapeFromCache(result.html ?? '').trim());
+        if (!Number.isFinite(id)) continue;
+        translations.set(id, unescapeFromCache(result.html ?? '').trim());
+        finalIds.add(id);
       }
       for (const listener of listeners) listener();
       return;
@@ -183,6 +218,7 @@ const startIncrementalCueTranslation = (): IncrementalTranslateSession => {
         sessionId,
         units: fresh.map(cue => ({ id: String(cue.id), html: escapeForCache(cue.text) })),
         maxConcurrency: YOUTUBE_SUBTITLE_MAX_CONCURRENCY,
+        wantPartials: true,
       });
     },
     cancel: () => {

@@ -82,11 +82,81 @@ interface OpenAIChatResponse {
   error?: { message?: string };
 }
 
+interface OpenAIStreamChunk {
+  choices?: Array<{ delta?: { content?: string } }>;
+  error?: { message?: string };
+}
+
+/** Consume an SSE chat-completions stream, invoking onDelta with the
+ *  accumulated text after every content delta. Returns the full text.
+ *  Backward compatible with servers that ignore `stream: true`: if no SSE
+ *  content arrives, the raw body is re-parsed as a plain JSON response. */
+const readStream = async (res: Response, onDelta: (accumulated: string) => void): Promise<string> => {
+  const reader = res.body?.getReader();
+  if (!reader) throw new TranslationError('PARSE', 'Streaming response has no body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let raw = '';
+  let accumulated = '';
+  let sawDone = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value, { stream: true });
+      buffer += text;
+      raw += text;
+      let newline = buffer.indexOf('\n');
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf('\n');
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') {
+          sawDone = true;
+          continue;
+        }
+        let chunk: OpenAIStreamChunk;
+        try {
+          chunk = JSON.parse(payload) as OpenAIStreamChunk;
+        } catch {
+          continue;
+        }
+        if (chunk.error?.message) throw new TranslationError('HTTP_ERROR', chunk.error.message);
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta) {
+          accumulated += delta;
+          onDelta(accumulated);
+        }
+      }
+      if (sawDone) break;
+    }
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw new TranslationError('ABORTED', 'Request aborted');
+    throw err;
+  }
+  if (accumulated) return accumulated;
+
+  // No SSE content — the server likely ignored `stream: true` and returned a
+  // regular JSON completion. Fall back to parsing the whole body.
+  try {
+    const data = JSON.parse(raw) as OpenAIChatResponse;
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content;
+    throw new TranslationError('PARSE', data.error?.message ?? 'Unexpected OpenAI response');
+  } catch (err) {
+    if (err instanceof TranslationError) throw err;
+    return accumulated;
+  }
+};
+
 const callChat = async (
   cred: ProviderCredential,
   systemPrompt: string,
   userText: string,
   signal?: AbortSignal,
+  onDelta?: (accumulated: string) => void,
 ): Promise<string> => {
   const baseUrl = trimUrl(cred.baseUrl?.trim() ?? '');
   const model = cred.model?.trim() ?? '';
@@ -105,6 +175,7 @@ const callChat = async (
       body: JSON.stringify({
         model,
         temperature: 0,
+        ...(onDelta ? { stream: true } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userText },
@@ -130,6 +201,8 @@ const callChat = async (
     throw new TranslationError(code, `OpenAI ${res.status}: ${detail || res.statusText}`, res.status);
   }
 
+  if (onDelta) return (await readStream(res, onDelta)).trim();
+
   const data = (await res.json()) as OpenAIChatResponse;
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== 'string') {
@@ -151,8 +224,10 @@ export const createOpenAICompatibleProvider = (cred: ProviderCredential): Transl
     const template = userTemplate && userTemplate.length > 0 ? userTemplate : DEFAULT_SYSTEM_PROMPT_TEMPLATE;
     const systemPrompt = expandTemplate(template, req.targetLang);
     const out: string[] = [];
-    for (const t of req.texts) {
-      out.push(await callChat(cred, systemPrompt, t, req.signal));
+    for (let i = 0; i < req.texts.length; i += 1) {
+      const onPartial = req.onPartial;
+      const onDelta = onPartial ? (text: string) => onPartial(i, text) : undefined;
+      out.push(await callChat(cred, systemPrompt, req.texts[i], req.signal, onDelta));
     }
     return out;
   },
