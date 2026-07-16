@@ -1,5 +1,26 @@
 import { TranslationError } from '../types.js';
-import type { ProviderCredential, TranslateRequest, TranslationProvider, ValidateResult } from '../types.js';
+import type {
+  CredentialField,
+  ProviderCredential,
+  ProviderId,
+  TranslateRequest,
+  TranslationProvider,
+  ValidateResult,
+} from '../types.js';
+
+/** Shape of a chat-completions-style provider. `openai-compatible` lets the
+ *  user supply any base URL; the DeepSeek and OpenAI presets pin it. */
+interface ChatProviderConfig {
+  id: ProviderId;
+  /** Display name used in error messages. */
+  label: string;
+  /** When set, the credential's baseUrl is ignored. */
+  fixedBaseUrl?: string;
+  /** Used when the credential does not specify a model. */
+  defaultModel?: string;
+  /** Fields the session-level credential check treats as required. */
+  credentialFields: CredentialField[];
+}
 
 const langLabel = (code: string): string => {
   const c = code.toLowerCase();
@@ -153,13 +174,14 @@ const readStream = async (res: Response, onDelta: (accumulated: string) => void)
 
 const callChat = async (
   cred: ProviderCredential,
+  config: ChatProviderConfig,
   systemPrompt: string,
   userText: string,
   signal?: AbortSignal,
   onDelta?: (accumulated: string) => void,
 ): Promise<string> => {
-  const baseUrl = trimUrl(cred.baseUrl?.trim() ?? '');
-  const model = cred.model?.trim() ?? '';
+  const baseUrl = config.fixedBaseUrl ?? trimUrl(cred.baseUrl?.trim() ?? '');
+  const model = cred.model?.trim() || config.defaultModel || '';
   const apiKey = cred.apiKey?.trim() ?? '';
   if (!baseUrl) throw new TranslationError('NO_API_KEY', 'Base URL is not configured');
   if (!model) throw new TranslationError('NO_API_KEY', 'Model is not configured');
@@ -198,7 +220,7 @@ const callChat = async (
       // ignore
     }
     const code = res.status === 401 || res.status === 403 ? 'AUTH' : res.status === 429 ? 'RATE_LIMIT' : 'HTTP_ERROR';
-    throw new TranslationError(code, `OpenAI ${res.status}: ${detail || res.statusText}`, res.status);
+    throw new TranslationError(code, `${config.label} ${res.status}: ${detail || res.statusText}`, res.status);
   }
 
   if (onDelta) return (await readStream(res, onDelta)).trim();
@@ -211,12 +233,12 @@ const callChat = async (
   return content.trim();
 };
 
-export const createOpenAICompatibleProvider = (cred: ProviderCredential): TranslationProvider => ({
-  id: 'openai-compatible',
+const createChatCompletionsProvider = (cred: ProviderCredential, config: ChatProviderConfig): TranslationProvider => ({
+  id: config.id,
   maxTextsPerRequest: 1,
   softMaxCharsPerRequest: 6_000,
   preservesHtml: true,
-  credentialFields: ['baseUrl', 'model', 'apiKey', 'systemPrompt'],
+  credentialFields: config.credentialFields,
 
   async translate(req: TranslateRequest): Promise<string[]> {
     if (req.texts.length === 0) return [];
@@ -227,18 +249,19 @@ export const createOpenAICompatibleProvider = (cred: ProviderCredential): Transl
     for (let i = 0; i < req.texts.length; i += 1) {
       const onPartial = req.onPartial;
       const onDelta = onPartial ? (text: string) => onPartial(i, text) : undefined;
-      out.push(await callChat(cred, systemPrompt, req.texts[i], req.signal, onDelta));
+      out.push(await callChat(cred, config, systemPrompt, req.texts[i], req.signal, onDelta));
     }
     return out;
   },
 
   async validate(c: ProviderCredential): Promise<ValidateResult> {
-    const baseUrl = trimUrl(c.baseUrl?.trim() ?? '');
-    if (!baseUrl) return { ok: false, message: 'Base URL is required' };
-    if (!c.model?.trim()) return { ok: false, message: 'Model is required' };
+    if (!config.fixedBaseUrl && !trimUrl(c.baseUrl?.trim() ?? '')) {
+      return { ok: false, message: 'Base URL is required' };
+    }
+    if (!config.defaultModel && !c.model?.trim()) return { ok: false, message: 'Model is required' };
     try {
       // 1-token translation to verify auth + model in one call.
-      const result = await callChat(c, 'You are a translator.', 'ping', undefined);
+      const result = await callChat(c, config, 'You are a translator.', 'ping', undefined);
       return result.length > 0 ? { ok: true } : { ok: false, message: 'Empty response' };
     } catch (err) {
       const e = err as { code?: string; message?: string };
@@ -248,4 +271,29 @@ export const createOpenAICompatibleProvider = (cred: ProviderCredential): Transl
   },
 });
 
-export { DEFAULT_SYSTEM_PROMPT_TEMPLATE };
+export const createOpenAICompatibleProvider = (cred: ProviderCredential): TranslationProvider =>
+  createChatCompletionsProvider(cred, {
+    id: 'openai-compatible',
+    label: 'OpenAI-compatible',
+    credentialFields: ['baseUrl', 'model', 'apiKey', 'systemPrompt'],
+  });
+
+export const createOpenAIProvider = (cred: ProviderCredential): TranslationProvider =>
+  createChatCompletionsProvider(cred, {
+    id: 'openai',
+    label: 'OpenAI',
+    fixedBaseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+    credentialFields: ['apiKey'],
+  });
+
+export const createDeepSeekProvider = (cred: ProviderCredential): TranslationProvider =>
+  createChatCompletionsProvider(cred, {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    fixedBaseUrl: 'https://api.deepseek.com',
+    defaultModel: 'deepseek-chat',
+    credentialFields: ['apiKey'],
+  });
+
+export { DEFAULT_SYSTEM_PROMPT_TEMPLATE, expandTemplate };

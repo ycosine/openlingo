@@ -260,6 +260,45 @@ const ProviderGlyph = ({ id, color = ACCENT, size = 15 }: { id: ProviderId; colo
       </svg>
     );
   }
+  if (id === 'anthropic') {
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <path
+          d="M5 19 L12 5.5 L19 19 M8.2 13.5 h7.6"
+          fill="none"
+          stroke={color}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (id === 'deepseek') {
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <path
+          d="M3 14.5 C6 8.5, 10 8.5, 12 12 S18 16.5, 21 11"
+          fill="none"
+          stroke={color}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <circle cx="18.5" cy="6.5" r="1.7" fill={color} />
+      </svg>
+    );
+  }
+  if (id === 'openai-compatible') {
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <g fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+          <path d="M3.5 8 H20.5 M3.5 16 H20.5" />
+        </g>
+        <circle cx="9" cy="8" r="2.4" fill={color} />
+        <circle cx="15" cy="16" r="2.4" fill={color} />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
       <g fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">

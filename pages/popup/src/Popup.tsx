@@ -190,6 +190,48 @@ const ProviderGlyph = ({ id, color = ACCENT, size = 12 }: { id: ProviderId; colo
       </svg>
     );
   }
+  if (id === 'anthropic') {
+    // Anthropic: A-frame mark
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <path
+          d="M5 19 L12 5.5 L19 19 M8.2 13.5 h7.6"
+          fill="none"
+          stroke={color}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (id === 'deepseek') {
+    // DeepSeek: wave with a spout dot
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <path
+          d="M3 14.5 C6 8.5, 10 8.5, 12 12 S18 16.5, 21 11"
+          fill="none"
+          stroke={color}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <circle cx="18.5" cy="6.5" r="1.7" fill={color} />
+      </svg>
+    );
+  }
+  if (id === 'openai-compatible') {
+    // Custom endpoint: slider knobs
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+        <g fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+          <path d="M3.5 8 H20.5 M3.5 16 H20.5" />
+        </g>
+        <circle cx="9" cy="8" r="2.4" fill={color} />
+        <circle cx="15" cy="16" r="2.4" fill={color} />
+      </svg>
+    );
+  }
   // OpenAI: simplified "Blossom" — three interlocking ellipses rotated around center
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
@@ -222,8 +264,14 @@ const getProviderStatus = (
     const tail = key.replace(/:fx$/, '').slice(-3) || '···';
     return { isReady: true, tier: isFree ? 'Free' : 'Pro', detail: `··${tail}` };
   }
+  if (providerId === 'anthropic' || providerId === 'deepseek' || providerId === 'openai') {
+    // Fixed endpoint and a default model — only the key is required.
+    const preset = getProviderPreset(providerId);
+    const ready = !!cred.apiKey?.trim();
+    return { isReady: ready, tier: preset.tier, detail: cred.model?.trim() || preset.defaults?.model || '' };
+  }
   const ready = !!(cred.apiKey?.trim() && cred.baseUrl?.trim() && cred.model?.trim());
-  return { isReady: ready, tier: 'Compatible', detail: cred.model?.trim() || 'openai' };
+  return { isReady: ready, tier: 'Compatible', detail: cred.model?.trim() || 'custom' };
 };
 
 const sendToActiveTab = async <T,>(msg: { type: string }): Promise<T | undefined> => {
@@ -879,7 +927,10 @@ const Popup = () => {
           : 'idle';
   const providerSummary = !status.isReady
     ? `${preset.name} · no key`
-    : providerId === 'openai-compatible'
+    : providerId === 'openai-compatible' ||
+        providerId === 'anthropic' ||
+        providerId === 'deepseek' ||
+        providerId === 'openai'
       ? `${preset.name} · ${status.detail}`
       : providerId === 'deepl'
         ? `${preset.name} · ${status.tier}`
@@ -910,7 +961,7 @@ const Popup = () => {
                 fontFamily: '"Geist Mono", ui-monospace, monospace',
                 letterSpacing: '0.02em',
               }}>
-              v0.1
+              v{chrome.runtime.getManifest().version}
             </span>
           </div>
         </div>

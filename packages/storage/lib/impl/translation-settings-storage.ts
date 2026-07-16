@@ -1,7 +1,7 @@
 import { createStorage, StorageEnum } from '../base/index.js';
 import type { BaseStorageType, ValueOrUpdateType } from '../base/index.js';
 
-type ProviderIdType = 'google-free' | 'deepl' | 'openai-compatible';
+type ProviderIdType = 'google-free' | 'deepl' | 'anthropic' | 'deepseek' | 'openai' | 'openai-compatible';
 
 type DisplayStyleType = 'block' | 'replace';
 
